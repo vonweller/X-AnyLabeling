@@ -457,12 +457,28 @@ class TrainingTab(QWidget):
         self.log_message("训练开始...")
 
         # Get parameters
-        data_yaml_path = self.data_yaml_path_edit.text()
+        # 分类任务下data参数为训练集根目录，检测任务下为yaml
+        if self.task_type == "classify":
+            data_yaml_path = self.train_images_edit.text()
+        else:
+            data_yaml_path = self.data_yaml_path_edit.text()
         epochs = self.epochs_spin.value()
         batch_size = self.batch_size_spin.value()
         img_size = self.img_size_spin.value()
         output_dir = self.output_dir_edit.text()
-        device = self.device_combo.currentText().split('(')[0].strip().lower() if self.device_combo.currentText() else ''
+        # 修正device解析逻辑
+        device_text = self.device_combo.currentText()
+        if "CPU" in device_text:
+            device = "cpu"
+        elif "GPU" in device_text:
+            import re
+            m = re.search(r"CUDA:(\\d+)", device_text)
+            if m:
+                device = m.group(1)
+            else:
+                device = ""  # fallback
+        else:
+            device = ""  # fallback
         task = self.task_type
         
         # Hyperparameters from text edit

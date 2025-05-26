@@ -197,7 +197,7 @@ class TrainingWorker(QObject):
 
         except Exception as e:
             self.log_update.emit(f"下载模型时出错: {traceback.format_exc()}")
-            self.training_error.emit(f"下载模型失败: {model_name_to_download}, 错误: {e}")
+            self.training_error.emit(f"下载模型失败: {model_name_to_download}, 错误: {e}\n建议：请前往Ultralytics官方模型发布页手动下载权重文件，并在本地加载。\nhttps://github.com/ultralytics/ultralytics-hub-models/releases")
             return None
 
     def _resolve_model_path(self):
