@@ -22,7 +22,7 @@ class MainWindow(QMainWindow):
     
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("YOLO目标检测训练与测试工具 zweicumt@163.com")
+        self.setWindowTitle("Vonweller AI Tools 529538187@qq.com")
         self.setMinimumSize(1200, 900)  # 增加最小尺寸
         self.resize(1400, 1000)  # 设置默认尺寸
         

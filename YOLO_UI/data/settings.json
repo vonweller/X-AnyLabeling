@@ -17,6 +17,6 @@
     "default_train_labels_dir": "",
     "default_val_images_dir": "",
     "default_val_labels_dir": "",
-    "default_test_images_dir": "",
-    "default_test_labels_dir": ""
+    "default_test_images_dir": "D:/Do/flxl/images/val",
+    "default_test_labels_dir": "D:/Do/flxl/labels/val"
 }

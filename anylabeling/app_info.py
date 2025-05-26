@@ -1,5 +1,5 @@
-__appname__ = "X-AnyLabeling"
+__appname__ = "Vonweller AI标注工具 529538187@qq.com"
 __appdescription__ = "Advanced Auto Labeling Solution with Added Features"
-__version__ = "3.0.2"
+__version__ = "6.6.6"
 __preferred_device__ = "CPU"  # GPU or CPU
-__url__ = "https://github.com/CVHub520/X-AnyLabeling"
+__url__ = "https://github.com/vonweller"

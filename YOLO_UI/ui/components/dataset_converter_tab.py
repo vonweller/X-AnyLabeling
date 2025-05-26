@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QPushButton, QFileDialog, QComboBox, QGroupBox,
                              QTextEdit, QMessageBox, QProgressBar, QLineEdit,
-                             QDoubleSpinBox)
+                             QDoubleSpinBox, QFormLayout)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from utils.dataset_converter import DatasetConverter
 import os
@@ -74,6 +74,32 @@ class DatasetConverterTab(QWidget):
     def init_ui(self):
         """Initialize the user interface"""
         layout = QVBoxLayout()
+        
+        # ===== 模型转换分组 =====
+        model_group = QGroupBox("模型转换")
+        model_layout = QFormLayout()
+        # PT模型选择
+        self.pt_model_layout = QHBoxLayout()
+        self.pt_model_edit = QLineEdit()
+        self.pt_model_edit.setReadOnly(True)
+        self.pt_model_btn = QPushButton("浏览...")
+        self.pt_model_layout.addWidget(self.pt_model_edit)
+        self.pt_model_layout.addWidget(self.pt_model_btn)
+        model_layout.addRow("PT模型文件:", self.pt_model_layout)
+        # 输出目录选择
+        self.onnx_output_layout = QHBoxLayout()
+        self.onnx_output_edit = QLineEdit()
+        self.onnx_output_edit.setReadOnly(True)
+        self.onnx_output_btn = QPushButton("浏览...")
+        self.onnx_output_layout.addWidget(self.onnx_output_edit)
+        self.onnx_output_layout.addWidget(self.onnx_output_btn)
+        model_layout.addRow("输出目录:", self.onnx_output_layout)
+        # 转换按钮
+        self.convert_btn = QPushButton("转换为ONNX")
+        self.convert_btn.setMinimumHeight(40)
+        model_layout.addRow(self.convert_btn)
+        model_group.setLayout(model_layout)
+        layout.addWidget(model_group)
         
         # Input group
         input_group = QGroupBox("输入设置")
@@ -234,6 +260,11 @@ class DatasetConverterTab(QWidget):
         
         # Initialize UI state
         self.on_mode_changed(self.mode_combo.currentText())
+        
+        # 连接模型转换信号
+        self.pt_model_btn.clicked.connect(self.select_pt_model)
+        self.onnx_output_btn.clicked.connect(self.select_onnx_output_dir)
+        self.convert_btn.clicked.connect(self.convert_to_onnx)
     
     def on_format_changed(self, format_type):
         """Handle format selection change"""
@@ -304,7 +335,7 @@ class DatasetConverterTab(QWidget):
             # Start conversion based on mode
             if mode == "overall":
                 images_dir = self.images_dir_edit.text()
-                labels_dir = self.labels_dir_edit.text()
+                labels_dir = self.labels_edit.text()
                 
                 if not images_dir:
                     QMessageBox.warning(self, "错误", "请选择图像目录")
@@ -353,4 +384,45 @@ class DatasetConverterTab(QWidget):
                 
         except Exception as e:
             QMessageBox.critical(self, "错误", f"转换过程中发生错误: {str(e)}")
-            self.log_text.append(f"错误: {str(e)}\n") 
+            self.log_text.append(f"错误: {str(e)}\n")
+
+    def select_pt_model(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择PT模型文件",
+            "",
+            "PyTorch Model Files (*.pt)"
+        )
+        if file_path:
+            self.pt_model_edit.setText(file_path)
+
+    def select_onnx_output_dir(self):
+        dir_path = QFileDialog.getExistingDirectory(
+            self,
+            "选择输出目录"
+        )
+        if dir_path:
+            self.onnx_output_edit.setText(dir_path)
+
+    def convert_to_onnx(self):
+        pt_model_path = self.pt_model_edit.text()
+        output_dir = self.onnx_output_edit.text()
+        if not pt_model_path or not os.path.isfile(pt_model_path):
+            QMessageBox.warning(self, "错误", "请选择有效的PT模型文件")
+            return
+        if not output_dir or not os.path.isdir(output_dir):
+            QMessageBox.warning(self, "错误", "请选择有效的输出目录")
+            return
+        try:
+            model_name = os.path.splitext(os.path.basename(pt_model_path))[0]
+            onnx_path = os.path.join(output_dir, f"{model_name}.onnx")
+            from ultralytics import YOLO
+            model = YOLO(pt_model_path)
+            model.export(format="onnx", imgsz=640)
+            if os.path.exists(f"{model_name}.onnx"):
+                os.rename(f"{model_name}.onnx", onnx_path)
+                QMessageBox.information(self, "转换成功", f"模型已成功转换为ONNX格式并保存到:\n{onnx_path}")
+            else:
+                QMessageBox.warning(self, "转换失败", "ONNX文件生成失败")
+        except Exception as e:
+            QMessageBox.critical(self, "转换错误", f"转换过程中发生错误:\n{str(e)}") 

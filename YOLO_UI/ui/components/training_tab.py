@@ -9,6 +9,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                             QInputDialog)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QUrl
 from PyQt5.QtGui import QColor, QFont, QDesktopServices
+import yaml
 
 from utils.training_worker import TrainingWorker
 from utils.data_validator import validate_yolo_dataset, inspect_dataset_structure
@@ -371,6 +372,37 @@ class TrainingTab(QWidget):
         
         # Task type combo
         self.task_combo.currentIndexChanged.connect(self.on_task_type_changed)
+
+        # Data.yaml 浏览按钮
+        self.data_yaml_btn.clicked.connect(self.on_data_yaml_btn_clicked)
+
+    def on_data_yaml_btn_clicked(self):
+        """选择数据集根目录后自动生成data.yaml"""
+        dir_path = QFileDialog.getExistingDirectory(self, "选择数据集根目录（images/labels的上级目录）")
+        if dir_path:
+            # 自动推断images/train, images/val, labels/train, labels/val
+            images_train = os.path.join(dir_path, "images", "train")
+            images_val = os.path.join(dir_path, "images", "val")
+            labels_train = os.path.join(dir_path, "labels", "train")
+            labels_val = os.path.join(dir_path, "labels", "val")
+            # 检查目录是否存在
+            missing = []
+            for p, name in zip([images_train, images_val, labels_train, labels_val],
+                               ["images/train", "images/val", "labels/train", "labels/val"]):
+                if not os.path.isdir(p):
+                    missing.append(name)
+            if missing:
+                QMessageBox.warning(self, "目录缺失", f"以下目录不存在，请检查数据集结构：\n" + "\n".join(missing))
+                return
+            self.train_images_edit.setText(images_train)
+            self.val_images_edit.setText(images_val)
+            self.train_labels_edit.setText(labels_train)
+            self.val_labels_edit.setText(labels_val)
+            # 自动生成data.yaml
+            self.try_create_data_yaml()
+            # 若生成成功，data_yaml_path_edit会被自动填入
+            if self.data_yaml_path_edit.text():
+                QMessageBox.information(self, "data.yaml已生成", f"已生成配置文件: {self.data_yaml_path_edit.text()}\n请根据需要检查和修改。")
 
     def on_model_source_changed(self, checked=None):
         # If a radio button is checked, then process
@@ -989,6 +1021,85 @@ class TrainingTab(QWidget):
         self.update_task_specific_ui()
         self.update_model_list()  # Update model list based on task type
         self.update_parameters_display() # Update displayed parameters for the new task
+        # 弹窗提示
+        if self.task_type == "classify":
+            QMessageBox.information(self, "分类任务数据集结构说明",
+                "分类任务数据集要求如下：\n\n"
+                "1. 训练集根目录下，每个类别为一个子文件夹，子文件夹名即为类别名。\n"
+                "2. 每个类别子文件夹内放置该类别的所有图片。\n"
+                "3. 验证集同理。\n\n"
+                "示例：\n"
+                "train/\n  cat/\n    img1.jpg\n    img2.jpg\n  dog/\n    img3.jpg\n    img4.jpg\n"
+            )
+        else:
+            QMessageBox.information(self, "目标检测任务数据集结构说明",
+                "目标检测任务数据集要求如下：\n\n"
+                "1. 训练/验证集分别有 images 和 labels 两个文件夹。\n"
+                "2. images/ 下为图片，labels/ 下为同名 txt 文件（YOLO格式）。\n"
+                "3. 根目录需有 data.yaml 配置文件。\n\n"
+                "示例：\n"
+                "dataset/\n  images/\n    train/\n      xxx.jpg\n    val/\n      yyy.jpg\n  labels/\n    train/\n      xxx.txt\n    val/\n      yyy.txt\n  data.yaml\n"
+                "\n如未检测到 data.yaml，将自动为你生成。"
+            )
+            # 自动生成data.yaml
+            self.try_create_data_yaml()
+
+    def try_create_data_yaml(self):
+        """在检测任务下，若未检测到data.yaml则自动生成一个模板。"""
+        if self.task_type != "detect":
+            return
+        # 推断根目录
+        train_dir = self.train_images_edit.text()
+        val_dir = self.val_images_edit.text()
+        if not train_dir or not val_dir:
+            return
+        # 推断根目录（假设train/val都在images/下）
+        root_dir = os.path.commonpath([train_dir, val_dir])
+        yaml_path = os.path.join(os.path.dirname(root_dir), "data.yaml")
+        if os.path.exists(yaml_path):
+            return
+        # 优先查找classes.txt
+        label_dir = self.train_labels_edit.text()
+        names = []
+        classes_txt_path = None
+        # 1. labels目录下
+        if label_dir and os.path.isdir(label_dir):
+            possible = os.path.join(label_dir, "classes.txt")
+            if os.path.isfile(possible):
+                classes_txt_path = possible
+        # 2. 根目录下
+        if not classes_txt_path:
+            possible = os.path.join(os.path.dirname(root_dir), "classes.txt")
+            if os.path.isfile(possible):
+                classes_txt_path = possible
+        # 读取类别名
+        if classes_txt_path:
+            with open(classes_txt_path, 'r', encoding='utf-8') as f:
+                names = [line.strip() for line in f if line.strip()]
+        else:
+            # 遍历所有txt，收集类别id
+            class_ids = set()
+            if label_dir and os.path.isdir(label_dir):
+                for fname in os.listdir(label_dir):
+                    if fname.endswith('.txt'):
+                        with open(os.path.join(label_dir, fname), 'r') as f:
+                            for line in f:
+                                if line.strip():
+                                    class_id = line.split()[0]
+                                    if class_id.isdigit():
+                                        class_ids.add(int(class_id))
+                if class_ids:
+                    names = [f'class{i}' for i in sorted(class_ids)]
+        data_yaml = {
+            'train': train_dir.replace('\\', '/'),
+            'val': val_dir.replace('\\', '/'),
+            'nc': len(names) if names else 1,
+            'names': names if names else ['class0']
+        }
+        with open(yaml_path, 'w', encoding='utf-8') as f:
+            yaml.dump(data_yaml, f, allow_unicode=True)
+        self.data_yaml_path_edit.setText(yaml_path)
+        QMessageBox.information(self, "已自动生成data.yaml", f"已在{os.path.dirname(root_dir)}生成data.yaml，类别名：{names if names else ['class0']}\n如需修改请手动编辑data.yaml或classes.txt。")
 
     def update_task_specific_ui(self):
         """Update UI elements specific to detection or classification tasks."""
