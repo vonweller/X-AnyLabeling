@@ -29,12 +29,14 @@ class TrainingTab(QWidget):
         self.dataset_format = "YOLO"  # Default dataset format
         self.model_type = "yolov8n.pt"  # Default YOLO model, ensure .pt extension
         self.train_mode = "pretrained"  # Default to using pretrained weights
+        self.model_source_option = "download" # "download", "local_folder", "custom_file"
         
         # Default paths (will be updated from settings if available)
         self.default_train_dir = ""
         self.default_val_dir = ""
         self.default_output_dir = ""
-        self.default_model_path = ""  # Added for default model path
+        self.default_model_path = ""  # For custom .pt file
+        self.default_local_model_search_dir = "" # For local model folder
         
         # Create scroll area with improved settings
         scroll = QScrollArea()
@@ -74,8 +76,10 @@ class TrainingTab(QWidget):
         
         # Initialize UI states
         self.update_task_specific_ui() # Call this to set initial UI based on task
+        self.update_model_list() # Populate model_combo early
+        self.download_model_radio.setChecked(True) # Set default source
+        self.update_model_source_ui_state() # Apply initial UI state for model source
         self.update_fine_tuning_state()
-        self.update_weights_path_state()
         
     def setup_ui(self, main_layout):
         """Create and arrange UI elements."""
@@ -91,100 +95,146 @@ class TrainingTab(QWidget):
         main_layout.addWidget(task_group)
 
         # Data section
-        self.data_group = QGroupBox("数据集") # Made data_group an instance variable
+        self.data_group = QGroupBox("数据集 (目标检测)")
         data_layout = QFormLayout()
-        data_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         
-        # Training images and labels
+        # Training data
         self.train_images_layout = QHBoxLayout()
         self.train_images_edit = QLineEdit()
         self.train_images_edit.setReadOnly(True)
         self.train_images_btn = QPushButton("浏览...")
         self.train_images_layout.addWidget(self.train_images_edit)
         self.train_images_layout.addWidget(self.train_images_btn)
-        self.train_images_label = QLabel("训练图像目录:") # Keep a reference to the label
+        self.train_images_label = QLabel("训练图像目录:")
         data_layout.addRow(self.train_images_label, self.train_images_layout)
-
+        
         self.train_labels_layout = QHBoxLayout()
         self.train_labels_edit = QLineEdit()
         self.train_labels_edit.setReadOnly(True)
         self.train_labels_btn = QPushButton("浏览...")
         self.train_labels_layout.addWidget(self.train_labels_edit)
         self.train_labels_layout.addWidget(self.train_labels_btn)
-        self.train_labels_label = QLabel("训练标签目录:") # Keep a reference to the label
+        self.train_labels_label = QLabel("训练标签目录:")
         data_layout.addRow(self.train_labels_label, self.train_labels_layout)
-
-        # Validation images and labels
+        
+        # Validation data
         self.val_images_layout = QHBoxLayout()
         self.val_images_edit = QLineEdit()
         self.val_images_edit.setReadOnly(True)
         self.val_images_btn = QPushButton("浏览...")
         self.val_images_layout.addWidget(self.val_images_edit)
         self.val_images_layout.addWidget(self.val_images_btn)
-        self.val_images_label = QLabel("验证图像目录:") # Keep a reference to the label
+        self.val_images_label = QLabel("验证图像目录:")
         data_layout.addRow(self.val_images_label, self.val_images_layout)
-
+        
         self.val_labels_layout = QHBoxLayout()
         self.val_labels_edit = QLineEdit()
         self.val_labels_edit.setReadOnly(True)
         self.val_labels_btn = QPushButton("浏览...")
         self.val_labels_layout.addWidget(self.val_labels_edit)
         self.val_labels_layout.addWidget(self.val_labels_btn)
-        self.val_labels_label = QLabel("验证标签目录:") # Keep a reference to the label
+        self.val_labels_label = QLabel("验证标签目录:")
         data_layout.addRow(self.val_labels_label, self.val_labels_layout)
         
-        # Add widgets to form layout
-        self.data_group.setLayout(data_layout) # Use self.data_group
+        # Data YAML path
+        self.data_yaml_layout = QHBoxLayout()
+        self.data_yaml_path_edit = QLineEdit()
+        self.data_yaml_path_edit.setReadOnly(True)
+        self.data_yaml_btn = QPushButton("浏览...")
+        self.data_yaml_layout.addWidget(self.data_yaml_path_edit)
+        self.data_yaml_layout.addWidget(self.data_yaml_btn)
+        data_layout.addRow("数据配置文件:", self.data_yaml_layout)
         
+        self.data_group.setLayout(data_layout)
+
         # Model section
         model_group = QGroupBox("模型配置")
         model_layout = QFormLayout()
-        
-        # Model type selection
+        model_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow) # Ensure fields expand
+
+        # Model type selection (e.g., yolov8n.pt)
         self.model_combo = QComboBox()
-        self.model_combo.currentTextChanged.connect(self.on_model_selection_changed)
+        # self.model_combo.currentTextChanged.connect(self.on_model_selection_changed) # Connection moved to connect_signals
+        model_layout.addRow(QLabel("模型类型:"), self.model_combo)
+
+        # Device selection
+        self.device_combo = QComboBox()
+        self.device_combo.addItems(["CPU", "GPU (CUDA:0)", "GPU (CUDA:1)", "GPU (CUDA:2)", "GPU (CUDA:3)"])
+        model_layout.addRow(QLabel("设备:"), self.device_combo)
+
+        # Hyperparameters text edit
+        self.hyperparameters_edit = QTextEdit()
+        self.hyperparameters_edit.setPlaceholderText("输入额外的超参数，每行一个，格式为 key=value\n例如:\nlr0=0.01\nmomentum=0.937\nweight_decay=0.0005")
+        self.hyperparameters_edit.setMaximumHeight(100)
+        model_layout.addRow(QLabel("额外超参数:"), self.hyperparameters_edit)
+
+        # Model Source Options (Radio Buttons)
+        model_source_box = QGroupBox("模型来源")
+        model_source_box_layout = QVBoxLayout() # Changed to QVBoxLayout for better spacing if needed
+
+        self.model_source_group = QButtonGroup(self)
+
+        self.download_model_radio = QRadioButton("下载官方预训练模型")
+        self.download_model_radio.setToolTip("从 Ultralytics 下载所选类型的官方预训练模型。")
+        self.model_source_group.addButton(self.download_model_radio)
+        model_source_box_layout.addWidget(self.download_model_radio)
+
+        self.local_folder_model_radio = QRadioButton("从本地文件夹选择预训练模型")
+        self.local_folder_model_radio.setToolTip("从您指定的本地文件夹中加载所选类型的预训练模型。")
+        self.model_source_group.addButton(self.local_folder_model_radio)
+        model_source_box_layout.addWidget(self.local_folder_model_radio)
         
-        # Model Initialization Options
-        init_group_box = QGroupBox("模型初始化")
-        init_layout = QVBoxLayout()
+        self.local_model_folder_layout = QHBoxLayout()
+        self.local_model_folder_edit = QLineEdit()
+        self.local_model_folder_edit.setPlaceholderText("选择包含模型的文件夹")
+        self.local_model_folder_edit.setReadOnly(True)
+        self.local_model_folder_btn = QPushButton("浏览...")
+        self.local_model_folder_layout.addWidget(self.local_model_folder_edit)
+        self.local_model_folder_layout.addWidget(self.local_model_folder_btn)
+        model_source_box_layout.addLayout(self.local_model_folder_layout)
+
+        self.custom_weights_radio = QRadioButton("使用自定义权重文件 (.pt)")
+        self.custom_weights_radio.setToolTip("加载一个特定的 .pt 权重文件，用于继续训练或使用自定义模型。")
+        self.model_source_group.addButton(self.custom_weights_radio)
+        model_source_box_layout.addWidget(self.custom_weights_radio)
+
+        self.custom_model_path_layout = QHBoxLayout()
+        self.custom_model_path_edit = QLineEdit()
+        self.custom_model_path_edit.setPlaceholderText("选择 .pt 模型文件")
+        self.custom_model_path_edit.setReadOnly(True)
+        self.custom_model_path_btn = QPushButton("浏览...")
+        self.custom_model_path_layout.addWidget(self.custom_model_path_edit)
+        self.custom_model_path_layout.addWidget(self.custom_model_path_btn)
+        model_source_box_layout.addLayout(self.custom_model_path_layout)
         
-        # Radio buttons for initialization options
-        self.model_init_group = QButtonGroup(self)
-        
-        self.use_pretrained_radio = QRadioButton("使用预训练权重")
-        self.from_scratch_radio = QRadioButton("从头开始训练（不使用预训练权重）")
-        self.custom_weights_radio = QRadioButton("使用自定义权重")
-        
-        self.model_init_group.addButton(self.use_pretrained_radio)
-        self.model_init_group.addButton(self.from_scratch_radio)
-        self.model_init_group.addButton(self.custom_weights_radio)
-        
-        init_layout.addWidget(self.use_pretrained_radio)
-        init_layout.addWidget(self.from_scratch_radio)
-        init_layout.addWidget(self.custom_weights_radio)
-        
-        # Custom weights path layout
-        self.model_path_layout = QHBoxLayout()
-        self.model_path_edit = QLineEdit()
-        self.model_path_edit.setReadOnly(True)
-        self.model_path_btn = QPushButton("浏览...")
-        self.model_path_layout.addWidget(self.model_path_edit)
-        self.model_path_layout.addWidget(self.model_path_btn)
-        
-        # Default to use pretrained
-        self.use_pretrained_radio.setChecked(True)
-        
-        # Initially disable the model path controls since 'Use pretrained' is selected by default
-        self.model_path_edit.setEnabled(False)
-        self.model_path_btn.setEnabled(False)
-        
-        # Fine-tuning mode
+        model_source_box.setLayout(model_source_box_layout)
+        model_layout.addRow(model_source_box)
+
+        # Fine-tuning mode (Moved out of init_group_box for clarity with new structure)
         self.fine_tuning_mode = QCheckBox("微调模式（冻结骨干网络，仅训练检测头）")
         self.fine_tuning_mode.setChecked(False)
+        # self.fine_tuning_mode.toggled.connect(self.update_fine_tuning_state) # Connection moved
+        model_layout.addRow(self.fine_tuning_mode)
+
+        # Model Initialization Options (Original: pretrained, scratch - This is now partially covered by source selection)
+        # For simplicity, "pretrained" is implied by "Download" or "Local Folder" + a .pt model.
+        # "From scratch" training needs to be handled.
+        init_options_group = QGroupBox("训练方式")
+        init_options_layout = QHBoxLayout()
+        self.train_mode_group = QButtonGroup(self)
+
+        self.use_selected_weights_radio = QRadioButton("使用选定权重 (下载/本地/自定义)") # New default
+        self.use_selected_weights_radio.setChecked(True)
+        self.train_mode_group.addButton(self.use_selected_weights_radio)
+        init_options_layout.addWidget(self.use_selected_weights_radio)
         
-        init_layout.addWidget(self.fine_tuning_mode)
-        init_group_box.setLayout(init_layout)
+        self.from_scratch_radio = QRadioButton("从头开始训练 (随机初始化)")
+        self.train_mode_group.addButton(self.from_scratch_radio)
+        init_options_layout.addWidget(self.from_scratch_radio)
         
+        init_options_group.setLayout(init_options_layout)
+        model_layout.addRow(init_options_group)
+
         # Hyperparameters
         self.batch_size_spin = QSpinBox()
         self.batch_size_spin.setRange(1, 128)
@@ -207,12 +257,12 @@ class TrainingTab(QWidget):
         
         # Add widgets to form layout
         model_layout.addRow("模型:", self.model_combo)
-        model_layout.addRow("自定义权重:", self.model_path_layout)
         model_layout.addRow("批次大小:", self.batch_size_spin)
         model_layout.addRow("训练轮数:", self.epochs_spin)
         model_layout.addRow("图像尺寸:", self.img_size_spin)
         model_layout.addRow("学习率:", self.lr_spin)
-        model_layout.addWidget(init_group_box)
+        model_layout.addWidget(init_options_group)
+        model_layout.addWidget(self.fine_tuning_mode)
         model_group.setLayout(model_layout)
         
         # Output section
@@ -287,152 +337,183 @@ class TrainingTab(QWidget):
         self.update_parameters_display()
     
     def connect_signals(self):
-        """Connect UI signals to slots."""
-        # Model selection change
-        self.model_combo.currentIndexChanged.connect(self.update_parameters_display)
+        """Connect UI signals to handlers."""
+        self.train_images_btn.clicked.connect(lambda: self.select_directory("选择训练图像目录", self.train_images_edit))
+        self.train_labels_btn.clicked.connect(lambda: self.select_directory("选择训练标签目录", self.train_labels_edit))
+        self.val_images_btn.clicked.connect(lambda: self.select_directory("选择验证图像目录", self.val_images_edit))
+        self.val_labels_btn.clicked.connect(lambda: self.select_directory("选择验证标签目录", self.val_labels_edit))
+        self.output_dir_btn.clicked.connect(self.select_output_dir)
         
-        # Directory selection
-        self.train_images_btn.clicked.connect(lambda: self.select_directory("训练图像目录", self.train_images_edit))
-        self.train_labels_btn.clicked.connect(lambda: self.select_directory("训练标签目录", self.train_labels_edit))
-        self.val_images_btn.clicked.connect(lambda: self.select_directory("验证图像目录", self.val_images_edit))
-        self.val_labels_btn.clicked.connect(lambda: self.select_directory("验证标签目录", self.val_labels_edit))
-        self.output_dir_btn.clicked.connect(lambda: self.select_directory("输出目录", self.output_dir_edit))
-        self.model_path_btn.clicked.connect(self.select_model_path)
+        self.model_combo.currentTextChanged.connect(self.on_model_selection_changed)
         
-        # Form controls
-        self.use_pretrained_radio.toggled.connect(self.on_initialization_mode_changed)
-        self.custom_weights_radio.toggled.connect(self.on_initialization_mode_changed)
-        self.from_scratch_radio.toggled.connect(self.on_initialization_mode_changed)
-        
-        # Connect fine-tuning checkbox to ensure it works only with pretrained weights
+        # Model Source Radio Buttons
+        self.download_model_radio.toggled.connect(self.on_model_source_changed)
+        self.local_folder_model_radio.toggled.connect(self.on_model_source_changed)
+        self.custom_weights_radio.toggled.connect(self.on_model_source_changed)
+
+        # Browse buttons for model paths
+        self.local_model_folder_btn.clicked.connect(self.select_local_model_folder)
+        self.custom_model_path_btn.clicked.connect(self.select_custom_model_file)
+
+        # Training Mode Radio Buttons
+        self.use_selected_weights_radio.toggled.connect(self.on_train_mode_changed)
+        self.from_scratch_radio.toggled.connect(self.on_train_mode_changed)
+
+        # Fine-tuning checkbox
         self.fine_tuning_mode.toggled.connect(self.update_fine_tuning_state)
-        
-        # Control buttons
-        self.validate_btn.clicked.connect(self.validate_dataset)
+
+        # Start/stop training buttons
         self.start_btn.clicked.connect(self.start_training)
         self.stop_btn.clicked.connect(self.stop_training)
-    
-    def on_initialization_mode_changed(self, checked=None):
-        """Handle changes to initialization mode radio buttons"""
-        # Update dependent UI states
-        self.update_weights_path_state()
-        self.update_fine_tuning_state()
         
-        # If training from scratch is selected, disable fine-tuning
-        if self.from_scratch_radio.isChecked() and self.fine_tuning_mode.isChecked():
-            self.fine_tuning_mode.setChecked(False)
-            self.log_message("从头开始训练不支持微调模式，已禁用微调")
-    
-    def select_train_dir(self):
-        """Open dialog to select training data directory."""
-        dir_path = QFileDialog.getExistingDirectory(self, "Select Training Data Directory")
-        if dir_path:
-            self.train_dir_edit.setText(dir_path)
-    
-    def select_val_dir(self):
-        """Open dialog to select validation data directory."""
-        dir_path = QFileDialog.getExistingDirectory(self, "Select Validation Data Directory")
-        if dir_path:
-            self.val_dir_edit.setText(dir_path)
-    
+        # Connect dataset validation button
+        self.validate_btn.clicked.connect(self.validate_dataset)
+        
+        # Task type combo
+        self.task_combo.currentIndexChanged.connect(self.on_task_type_changed)
+
+    def on_model_source_changed(self, checked=None):
+        # If a radio button is checked, then process
+        if checked is None or checked: # Ensure this is called correctly
+            self.update_model_source_ui_state()
+
+    def on_train_mode_changed(self, checked=None):
+        if checked is None or checked:
+            self.update_model_source_ui_state() # Re-evaluate UI state, especially for fine-tuning
+
     def select_output_dir(self):
-        """Open dialog to select output directory."""
-        dir_path = QFileDialog.getExistingDirectory(self, "Select Output Directory")
+        self.select_directory("选择输出目录", self.output_dir_edit)
+
+    def select_local_model_folder(self):
+        """Selects a folder containing local models."""
+        dir_path = QFileDialog.getExistingDirectory(
+            self, 
+            "选择本地模型文件夹", 
+            self.default_local_model_search_dir if self.default_local_model_search_dir else os.getcwd()
+        )
         if dir_path:
-            self.output_dir_edit.setText(dir_path)
-    
-    def select_model_path(self):
-        """Open dialog to select model weights file."""
+            self.local_model_folder_edit.setText(dir_path)
+            self.default_local_model_search_dir = dir_path # Update default path for next time
+            # Optionally, you could try to find a model in this folder that matches self.model_combo.currentText()
+            # and update an internal variable for the model path.
+
+    def select_custom_model_file(self):
+        """Selects a custom model file (.pt)."""
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Select Model Weights", "", "Model Files (*.pt *.pth *.weights);;All Files (*)"
+            self, 
+            "选择自定义模型权重文件 (.pt)", 
+            self.default_model_path, 
+            "PyTorch Model Files (*.pt)"
         )
         if file_path:
-            self.model_path_edit.setText(file_path)
-            # Update fine-tuning state since a model has been selected
-            self.update_fine_tuning_state()
-    
+            self.custom_model_path_edit.setText(file_path)
+            self.default_model_path = os.path.dirname(file_path) # Update default dir for next time
+
     def start_training(self):
-        """Validate inputs and start training in a separate thread."""
-        # Validate inputs
+        if self.is_training:
+            QMessageBox.warning(self, "警告", "训练已在进行中。")
+            return
+
         if not self.validate_inputs():
             return
-        
-        # Disable UI elements during training
-        self.set_ui_enabled(False)
-        self.is_training = True
-        
-        # Clear log
-        self.log_text.clear()
-        self.log_message("正在准备训练任务...")
-        
-        # Determine which training mode to use
-        if self.custom_weights_radio.isChecked():
-            # Custom weights mode
-            model_weights_path = self.model_path_edit.text()
-            if not model_weights_path:
-                self.log_message("警告: 选择了自定义权重，但未指定权重文件")
-                QMessageBox.warning(self, "缺少输入", "使用自定义权重模式时，请选择模型权重文件。")
-                self.set_ui_enabled(True)
-                self.is_training = False
-                return
-            # For custom weights, pretrained is False as we are providing specific weights.
-            # The model_type (e.g., yolov8n-cls) might still be relevant for architecture if weights are partial.
-            # However, Ultralytics typically infers architecture from .pt file itself.
-            # We pass the raw model_type, and the worker will use model_weights_path primarily.
-            current_model_type_for_worker = self.model_type # e.g., "yolov8n-cls"
-            use_pretrained_for_worker = False
-            model_weights_for_worker = model_weights_path
-            self.log_message(f"使用自定义权重: {model_weights_path} 为模型 {current_model_type_for_worker}")
 
-        elif self.use_pretrained_radio.isChecked():
-            # Pretrained weights mode
-            current_model_type_for_worker = self.model_type # e.g., "yolov8n-cls"
-            use_pretrained_for_worker = True
-            model_weights_for_worker = None # Worker will handle forming "model_type.pt" for download/load
-            self.log_message(f"使用预训练权重初始化模型: {current_model_type_for_worker}")
-        else: # self.from_scratch_radio.isChecked()
-            # Train from scratch mode
-            current_model_type_for_worker = self.model_type # e.g., "yolov8n-cls"
-            use_pretrained_for_worker = False
-            model_weights_for_worker = None # Worker will handle forming "model_type.yaml" for loading config
-            self.log_message(f"从头开始训练模型 (不使用预训练权重): {current_model_type_for_worker}")
+        # Determine the model weights to use
+        model_weights = ""
+        train_from_scratch = self.from_scratch_radio.isChecked()
+
+        if not train_from_scratch:
+            if self.download_model_radio.isChecked():
+                selected_model_name = self.model_combo.currentText()
+                if not selected_model_name.endswith((".pt", ".pth")):
+                    selected_model_name += ".pt"
+                model_weights = selected_model_name
+                self.log_message(f"准备下载模型: {model_weights}")
+            elif self.local_folder_model_radio.isChecked():
+                folder_path = self.local_model_folder_edit.text()
+                selected_model_name = self.model_combo.currentText()
+                if not selected_model_name.endswith((".pt", ".pth")):
+                    selected_model_name += ".pt"
+                potential_path = os.path.join(folder_path, selected_model_name)
+                if os.path.isfile(potential_path):
+                    model_weights = potential_path
+                    self.log_message(f"使用本地模型: {model_weights}")
+                else:
+                    QMessageBox.warning(self, "错误", f"在指定文件夹中未找到模型文件: {selected_model_name}")
+                    return
+            elif self.custom_weights_radio.isChecked():
+                model_weights = self.custom_model_path_edit.text()
+                if not model_weights or not os.path.isfile(model_weights):
+                    QMessageBox.warning(self, "错误", "自定义权重文件路径无效或未选择。")
+                    return
+                self.log_message(f"使用自定义权重: {model_weights}")
+        else:
+            model_weights = self.model_type.replace(".pt", "")
+            self.log_message(f"从头开始训练模型: {model_weights} (使用相应配置)")
+
+        self.is_training = True
+        self.set_ui_enabled(False)
+        self.progress_bar.setValue(0)
+        self.log_text.clear()
+        self.log_message("训练开始...")
+
+        # Get parameters
+        data_yaml_path = self.data_yaml_path_edit.text()
+        epochs = self.epochs_spin.value()
+        batch_size = self.batch_size_spin.value()
+        img_size = self.img_size_spin.value()
+        output_dir = self.output_dir_edit.text()
+        device = self.device_combo.currentText().split('(')[0].strip().lower() if self.device_combo.currentText() else ''
+        task = self.task_type
         
-        # Check if it's fine-tuning mode
-        fine_tuning = self.fine_tuning_mode.isChecked()
-        if fine_tuning and not (self.use_pretrained_radio.isChecked() or self.custom_weights_radio.isChecked()):
-            self.log_message("警告: 微调模式需要预训练模型或自定义权重！已禁用微调。")
-            fine_tuning = False
-        
-        # Create worker instance
-        self.training_worker = TrainingWorker(
-            model_type=current_model_type_for_worker, # Pass the base model type e.g., "yolov8n-cls"
-            task_type=self.task_type,
-            train_dir=self.train_images_edit.text(),
-            val_dir=self.val_images_edit.text(), 
-            output_dir=self.output_dir_edit.text(),
-            project_name=self.project_name_edit.text(),
-            batch_size=self.batch_size_spin.value(),
-            epochs=self.epochs_spin.value(),
-            img_size=self.img_size_spin.value(),
-            learning_rate=self.lr_spin.value(),
-            pretrained=use_pretrained_for_worker, # Explicitly pass the pretrained flag
-            model_weights=model_weights_for_worker, # Pass the path to custom weights, or None
-            fine_tuning=fine_tuning
-        )
-        
+        # Hyperparameters from text edit
+        try:
+            hyperparameters_str = self.hyperparameters_edit.toPlainText() if hasattr(self, 'hyperparameters_edit') else ""
+            other_args = self.parse_hyperparameters(hyperparameters_str)
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"解析超参数时出错: {e}")
+            self.set_ui_enabled(True)
+            self.is_training = False
+            return
+            
+        freeze_backbone = self.fine_tuning_mode.isChecked() if task == "detect" else False
+        if task == "classify" and self.fine_tuning_mode.isChecked():
+            other_args['freeze'] = 10
+
+        # 创建训练工作线程
         self.training_thread = QThread()
+        self.training_worker = TrainingWorker(
+            model_name=model_weights,
+            data_yaml_path=data_yaml_path,
+            epochs=epochs,
+            batch_size=batch_size,
+            img_size=img_size,
+            output_dir=output_dir,
+            device=device,
+            task=task,
+            is_from_scratch=train_from_scratch,
+            freeze_backbone=freeze_backbone,
+            other_args=other_args,
+            model_source_option=self.model_source_option,
+            local_model_search_dir=self.local_model_folder_edit.text() if self.local_folder_model_radio.isChecked() else None,
+            project_name=self.project_name_edit.text()
+        )
+
+        # 将worker移动到线程
         self.training_worker.moveToThread(self.training_thread)
-        
-        # Connect signals
-        self.training_worker.progress_update.connect(self.update_progress)
+
+        # 连接信号
+        self.training_worker.progress_update.connect(self.progress_bar.setValue)
         self.training_worker.log_update.connect(self.log_message)
         self.training_worker.training_complete.connect(self.on_training_complete)
         self.training_worker.training_error.connect(self.on_training_error)
+
+        # 连接线程启动信号到worker的run方法
         self.training_thread.started.connect(self.training_worker.run)
-        
-        # Start training
+
+        # 启动线程
         self.training_thread.start()
-    
+        self.log_message("训练线程已启动...")
+
     def stop_training(self):
         """Stop the training process."""
         self.log_message("Stopping training (please wait)...")
@@ -496,8 +577,8 @@ class TrainingTab(QWidget):
         
         # Model path button should only be enabled if custom weights is checked
         model_path_enabled = enabled and self.custom_weights_radio.isChecked()
-        self.model_path_btn.setEnabled(model_path_enabled)
-        self.model_path_edit.setEnabled(model_path_enabled)
+        self.custom_model_path_btn.setEnabled(model_path_enabled)
+        self.custom_model_path_edit.setEnabled(model_path_enabled)
         
         self.model_combo.setEnabled(enabled)
         self.batch_size_spin.setEnabled(enabled)
@@ -506,221 +587,234 @@ class TrainingTab(QWidget):
         self.lr_spin.setEnabled(enabled)
         
         # Radio buttons for model initialization
-        self.use_pretrained_radio.setEnabled(enabled)
+        self.use_selected_weights_radio.setEnabled(enabled)
         self.from_scratch_radio.setEnabled(enabled)
         self.custom_weights_radio.setEnabled(enabled)
         
         # Fine-tuning is only enabled if using pretrained or custom weights
-        fine_tuning_enabled = enabled and (self.use_pretrained_radio.isChecked() or self.custom_weights_radio.isChecked())
+        fine_tuning_enabled = enabled and (self.use_selected_weights_radio.isChecked() or self.custom_weights_radio.isChecked())
         self.fine_tuning_mode.setEnabled(fine_tuning_enabled)
         
         self.project_name_edit.setEnabled(enabled)
     
     def validate_inputs(self):
-        """Validate user inputs before starting training."""
-        # 检查训练图像目录
-        if not self.train_images_edit.text():
-            QMessageBox.warning(self, "缺少输入", "请选择训练数据目录。")
-            return False
-
-        # 对于检测任务，标签目录是必需的
+        """验证训练输入参数"""
+        # 只在检测任务下要求yaml
         if self.task_type == "detect":
-            if not self.train_labels_edit.text():
-                QMessageBox.warning(self, "缺少输入", "目标检测任务请选择训练标签目录。")
+            if not self.data_yaml_path_edit.text():
+                QMessageBox.warning(self, "错误", "请选择数据配置文件 (data.yaml)")
                 return False
-            if not self.val_labels_edit.text() and self.val_images_edit.text(): # If val images are provided, labels are also needed for detection
-                QMessageBox.warning(self, "缺少输入", "目标检测任务请为验证集选择标签目录。")
-                return False
+        # 分类任务不检查data_yaml
 
-        # 验证图像目录不是必须的，但如果提供了，其标签目录对于检测也是必须的
-        if not self.val_images_edit.text() and self.task_type == "detect" and self.val_labels_edit.text():
-            QMessageBox.warning(self, "输入不一致", "为验证集提供了标签目录但未提供图像目录。")
-            return False
-
-        # 检查输出目录
+        # 验证输出目录
         if not self.output_dir_edit.text():
-            QMessageBox.warning(self, "缺少输入", "请选择输出目录。")
+            QMessageBox.warning(self, "错误", "请选择输出目录")
             return False
+
+        # 验证项目名称
+        if not self.project_name_edit.text():
+            QMessageBox.warning(self, "错误", "请输入项目名称")
+            return False
+
+        # 验证模型选择
+        if not self.model_combo.currentText():
+            QMessageBox.warning(self, "错误", "请选择模型类型")
+            return False
+
+        # 验证模型来源
+        if self.download_model_radio.isChecked():
+            # 下载模式不需要额外验证
+            pass
+        elif self.local_folder_model_radio.isChecked():
+            if not self.local_model_folder_edit.text():
+                QMessageBox.warning(self, "错误", "请选择本地模型文件夹")
+                return False
+        elif self.custom_weights_radio.isChecked():
+            if not self.custom_model_path_edit.text():
+                QMessageBox.warning(self, "错误", "请选择自定义权重文件")
+                return False
+            if not os.path.isfile(self.custom_model_path_edit.text()):
+                QMessageBox.warning(self, "错误", "自定义权重文件不存在")
+                return False
+
+        # 验证训练参数
+        if self.epochs_spin.value() <= 0:
+            QMessageBox.warning(self, "错误", "训练轮数必须大于0")
+            return False
+        if self.batch_size_spin.value() <= 0:
+            QMessageBox.warning(self, "错误", "批次大小必须大于0")
+            return False
+        if self.img_size_spin.value() <= 0:
+            QMessageBox.warning(self, "错误", "图像尺寸必须大于0")
+            return False
+
+        # 验证数据集路径
+        if self.task_type == "detect":
+            if not self.train_images_edit.text():
+                QMessageBox.warning(self, "错误", "请选择训练图像目录")
+                return False
+            if not self.train_labels_edit.text():
+                QMessageBox.warning(self, "错误", "请选择训练标签目录")
+                return False
+            if not self.val_images_edit.text():
+                QMessageBox.warning(self, "错误", "请选择验证图像目录")
+                return False
+            if not self.val_labels_edit.text():
+                QMessageBox.warning(self, "错误", "请选择验证标签目录")
+                return False
+        else:  # classify
+            if not self.train_images_edit.text():
+                QMessageBox.warning(self, "错误", "请选择训练集根目录")
+                return False
+            if not self.val_images_edit.text():
+                QMessageBox.warning(self, "错误", "请选择验证集根目录")
+                return False
+
         return True
     
     def update_settings(self, settings):
-        """Update tab settings based on settings from settings tab."""
-        if 'default_model' in settings:
-            index = self.model_combo.findText(settings['default_model'])
-            if index >= 0:
-                self.model_combo.setCurrentIndex(index)
-                self.model_type = settings['default_model']
-        
-        if 'default_batch_size' in settings:
-            self.batch_size_spin.setValue(settings['default_batch_size'])
-        
-        if 'default_img_size' in settings:
-            self.img_size_spin.setValue(settings['default_img_size'])
-        
-        # Update default paths for images/labels and set in UI if empty
-        if 'default_train_images_dir' in settings:
-            if settings['default_train_images_dir'] and not self.train_images_edit.text():
-                self.train_images_edit.setText(settings['default_train_images_dir'])
-        if 'default_train_labels_dir' in settings:
-            if settings['default_train_labels_dir'] and not self.train_labels_edit.text():
-                self.train_labels_edit.setText(settings['default_train_labels_dir'])
-        if 'default_val_images_dir' in settings:
-            if settings['default_val_images_dir'] and not self.val_images_edit.text():
-                self.val_images_edit.setText(settings['default_val_images_dir'])
-        if 'default_val_labels_dir' in settings:
-            if settings['default_val_labels_dir'] and not self.val_labels_edit.text():
-                self.val_labels_edit.setText(settings['default_val_labels_dir'])
-        
-        if 'default_output_dir' in settings:
-            self.default_output_dir = settings['default_output_dir']
-            if self.default_output_dir and not self.output_dir_edit.text():
-                self.output_dir_edit.setText(self.default_output_dir)
-            
-        # Update default model path and set in UI if empty
-        if 'default_train_model_path' in settings:
-            self.default_model_path = settings['default_train_model_path']
-            if self.default_model_path and not self.model_path_edit.text():
-                self.model_path_edit.setText(self.default_model_path)
-                # If a default model path is provided, select custom weights radio button
-                self.custom_weights_radio.setChecked(True)
-            
-        # Update UI states
-        self.update_weights_path_state()
-        self.update_fine_tuning_state()
-    
-    def update_fine_tuning_state(self, checked=None):
-        """Update UI state based on fine-tuning and model initialization options."""
-        # Fine-tuning requires pretrained or custom weights
-        using_pretrained_weights = self.use_pretrained_radio.isChecked() or self.custom_weights_radio.isChecked()
-        using_custom_weights = self.custom_weights_radio.isChecked() and bool(self.model_path_edit.text())
-        
-        # Fine-tuning is only enabled if using pretrained or valid custom weights
-        fine_tuning_enabled = using_pretrained_weights or using_custom_weights
-        
-        # Set the enabled state of fine_tuning_mode checkbox
-        self.fine_tuning_mode.setEnabled(fine_tuning_enabled)
-        
-        # If fine-tuning is checked but not using pretrained or custom weights, uncheck it
-        if self.fine_tuning_mode.isChecked() and not fine_tuning_enabled:
-            self.fine_tuning_mode.setChecked(False)
-        
-        # Update the tooltip based on state
-        if fine_tuning_enabled:
-            self.fine_tuning_mode.setToolTip("冻结检测头之前的所有参数，仅更新检测头参数")
+        """Update UI elements with loaded settings."""
+        self.default_train_dir = settings.get('default_train_dir', os.getcwd())
+        self.default_val_dir = settings.get('default_val_dir', os.getcwd())
+        self.default_output_dir = settings.get('default_output_dir', os.getcwd())
+        self.default_model_path = settings.get('default_model_path', os.getcwd()) # For custom .pt
+        self.default_local_model_search_dir = settings.get('default_local_model_search_dir', os.getcwd())
+
+        self.train_images_edit.setText(settings.get('train_images_path', self.default_train_dir))
+        # ... (other settings for paths)
+        self.data_yaml_path_edit.setText(settings.get('data_yaml_path', ''))
+        self.output_dir_edit.setText(settings.get('output_dir', self.default_output_dir))
+
+        # Update model combo selection
+        saved_model_type = settings.get('model_type', 'yolov8n.pt')
+        if self.model_combo.findText(saved_model_type) != -1:
+            self.model_combo.setCurrentText(saved_model_type)
         else:
-            self.fine_tuning_mode.setToolTip("微调模式需要预训练模型或指定的权重文件")
-    
-    def update_weights_path_state(self, checked=None):
-        """Enable or disable custom weights path based on radio button state"""
-        # Only enable the model path controls when custom weights is selected
-        is_custom = self.custom_weights_radio.isChecked()
-        self.model_path_edit.setEnabled(is_custom)
-        self.model_path_btn.setEnabled(is_custom)
+            self.model_combo.setCurrentIndex(0) # Fallback
+
+        # Update model source option and related paths
+        model_source = settings.get('model_source_option', 'download')
+        if model_source == 'local_folder':
+            self.local_folder_model_radio.setChecked(True)
+            self.local_model_folder_edit.setText(settings.get('local_model_folder_path', self.default_local_model_search_dir))
+            self.custom_model_path_edit.clear()
+        elif model_source == 'custom_file':
+            self.custom_weights_radio.setChecked(True)
+            self.custom_model_path_edit.setText(settings.get('custom_model_file_path', self.default_model_path))
+            self.local_model_folder_edit.clear()
+        else: # download
+            self.download_model_radio.setChecked(True)
+            self.local_model_folder_edit.clear()
+            self.custom_model_path_edit.clear()
         
-        # Clear the path if custom weights is not selected
-        if not is_custom:
-            self.model_path_edit.clear()
-    
+        # Training mode (selected weights vs from scratch)
+        train_mode_val = settings.get('train_mode', 'selected_weights')
+        if train_mode_val == 'from_scratch':
+            self.from_scratch_radio.setChecked(True)
+        else:
+            self.use_selected_weights_radio.setChecked(True)
+
+        self.fine_tuning_mode.setChecked(settings.get('fine_tuning_mode', False))
+        
+        # Hyperparameters
+        self.batch_size_spin.setValue(settings.get('batch_size', 16))
+        self.epochs_spin.setValue(settings.get('epochs', 100))
+        self.img_size_spin.setValue(settings.get('img_size', 640))
+        # ... (other hyperparams like learning rate etc.)
+
+        # Device setting
+        saved_device = settings.get('device', 'cpu')
+        device_index = self.device_combo.findText(saved_device, Qt.MatchContains)
+        if device_index != -1:
+            self.device_combo.setCurrentIndex(device_index)
+        
+        self.update_model_source_ui_state() # IMPORTANT: Update UI based on loaded settings
+        self.update_fine_tuning_state()
+
+    def update_model_source_ui_state(self):
+        """Updates UI elements based on the selected model source and train mode."""
+        is_download = self.download_model_radio.isChecked()
+        is_local_folder = self.local_folder_model_radio.isChecked()
+        is_custom_file = self.custom_weights_radio.isChecked()
+        is_from_scratch = self.from_scratch_radio.isChecked()
+
+        # Enable/Disable Local Model Folder selection
+        self.local_model_folder_edit.setEnabled(is_local_folder and not is_from_scratch)
+        self.local_model_folder_btn.setEnabled(is_local_folder and not is_from_scratch)
+        if not (is_local_folder and not is_from_scratch):
+            self.local_model_folder_edit.clear() # Clear if not active
+
+        # Enable/Disable Custom Model File selection
+        self.custom_model_path_edit.setEnabled(is_custom_file and not is_from_scratch)
+        self.custom_model_path_btn.setEnabled(is_custom_file and not is_from_scratch)
+        if not (is_custom_file and not is_from_scratch):
+            self.custom_model_path_edit.clear() # Clear if not active
+            
+        # Model combo is always enabled, but its meaning changes slightly
+        # Fine tuning mode might depend on whether we are training from scratch or not
+        self.fine_tuning_mode.setEnabled(not is_from_scratch and self.task_type == "detect") # Or general logic
+
+        # Update placeholder texts
+        if is_download and not is_from_scratch:
+            self.model_combo.setToolTip("选择要自动下载的官方预训练模型。")
+            self.local_model_folder_edit.setPlaceholderText("通过上方选择'从本地文件夹...'")
+            self.custom_model_path_edit.setPlaceholderText("通过上方选择'使用自定义权重文件...'")
+        elif is_local_folder and not is_from_scratch:
+            self.model_combo.setToolTip("选择模型类型，然后在下方指定包含该类型模型的文件夹。")
+            self.local_model_folder_edit.setPlaceholderText("选择包含所选类型模型的本地文件夹")
+        elif is_custom_file and not is_from_scratch:
+            self.model_combo.setToolTip("模型类型(仅参考), 将使用下方指定的.pt文件。") # Model combo becomes less critical here
+            self.custom_model_path_edit.setPlaceholderText("选择您的自定义 .pt 模型文件")
+        elif is_from_scratch:
+            self.model_combo.setToolTip("选择要从零开始训练的模型架构 (例如 yolov8n, yolov8s-cls)。")
+            self.local_model_folder_edit.setEnabled(False)
+            self.local_model_folder_btn.setEnabled(False)
+            self.custom_model_path_edit.setEnabled(False)
+            self.custom_model_path_btn.setEnabled(False)
+
+        # Store the current selection
+        if is_download:
+            self.model_source_option = "download"
+        elif is_local_folder:
+            self.model_source_option = "local_folder"
+        elif is_custom_file:
+            self.model_source_option = "custom_file"
+        
+        if is_from_scratch:
+            self.train_mode = "scratch"
+        else:
+            self.train_mode = "pretrained" # or 'custom' depending on source
+
+        # Update fine-tuning state which depends on whether a model is loaded/selected
+        self.update_fine_tuning_state()
+
+    def update_fine_tuning_state(self, checked=None):
+        """Enable/Disable fine-tuning checkbox based on current settings."""
+        # Fine-tuning is usually applicable when using pre-trained weights and for detection tasks.
+        # It might not make sense or have a different meaning "from scratch".
+        can_fine_tune = not self.from_scratch_radio.isChecked() and self.task_type == "detect"
+        self.fine_tuning_mode.setEnabled(can_fine_tune)
+        if not can_fine_tune:
+            self.fine_tuning_mode.setChecked(False) # Uncheck if disabled
+        
+        # Update the text based on task type, even if disabled, to be informative
+        if self.task_type == "detect":
+            self.fine_tuning_mode.setText("微调模式 (冻结主干网络，仅训练检测头)")
+        elif self.task_type == "classify":
+            # For classification, ultralytics uses 'freeze' argument (e.g., freeze=10 for first 10 layers)
+            self.fine_tuning_mode.setText("微调模式 (例如，冻结分类模型的部分层)") 
+            # self.fine_tuning_mode.setEnabled(not self.from_scratch_radio.isChecked()) # Classifier fine-tuning might be possible
+        else: # segment, pose, etc.
+            self.fine_tuning_mode.setText("微调模式 (特定于任务)")
+            # self.fine_tuning_mode.setEnabled(not self.from_scratch_radio.isChecked())
+
     def select_directory(self, title, line_edit):
         dir_path = QFileDialog.getExistingDirectory(self, title)
         if dir_path:
+            dir_path = dir_path.strip('\'"')  # 自动去除首尾引号
             line_edit.setText(dir_path)
+        # 不再自动同步到settings_tab，也不自动保存设置
 
-            # Automatically create train/val subdirectories for classification task
-            if self.task_type == "classify" and line_edit is self.train_images_edit:
-                selected_path = dir_path
-                train_subdir = os.path.join(selected_path, "train")
-                val_subdir = os.path.join(selected_path, "val")
-                created_train_val_folders = False
-
-                # Check if 'train' and 'val' subdirectories are missing and the selected path is not itself 'train' or 'val'
-                if not os.path.exists(train_subdir) and \
-                   not os.path.exists(val_subdir) and \
-                   os.path.basename(selected_path).lower() not in ["train", "val"]:
-                    
-                    reply_train_val = QMessageBox.question(self, '创建训练/验证子目录?',
-                                                       f"您选择的目录 '{selected_path}' \n"
-                                                       f"不包含 'train' 和 'val' 子文件夹。\n\n"
-                                                       f"您希望自动创建它们以符合标准的分类数据集结构吗?",
-                                                       QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
-                    
-                    if reply_train_val == QMessageBox.Yes:
-                        try:
-                            os.makedirs(train_subdir, exist_ok=True)
-                            os.makedirs(val_subdir, exist_ok=True)
-                            self.log_message(f"已在 '{selected_path}' 中创建 'train' 和 'val' 子文件夹。")
-                            created_train_val_folders = True
-                        except Exception as e:
-                            self.log_message(f"创建 train/val 子文件夹失败: {e}")
-                            QMessageBox.critical(self, "错误", f"创建 train/val 子文件夹失败: {e}")
-                elif os.path.exists(train_subdir) and os.path.exists(val_subdir):
-                    created_train_val_folders = True # They already exist
-                elif os.path.exists(train_subdir) and not os.path.exists(val_subdir):
-                    # If only train exists, ask to create val
-                    reply_val = QMessageBox.question(self, '创建验证子目录?', 
-                                                   f"目录 '{train_subdir}' 已存在，但 'val' 子文件夹缺失。\n"
-                                                   f"您希望创建 'val' 子文件夹吗?",
-                                                   QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
-                    if reply_val == QMessageBox.Yes:
-                        try:
-                            os.makedirs(val_subdir, exist_ok=True)
-                            self.log_message(f"已在 '{selected_path}' 中创建 'val' 子文件夹。")
-                            created_train_val_folders = True # Now both should exist or train exists and val is created
-                        except Exception as e:
-                            self.log_message(f"创建 'val' 子文件夹失败: {e}")
-                            QMessageBox.critical(self, "错误", f"创建 'val' 子文件夹失败: {e}")
-                    else:
-                         # User chose not to create val, proceed if train exists
-                         created_train_val_folders = os.path.exists(train_subdir) 
-                else: # train doesn't exist, but val might (unlikely scenario, but handle)
-                    created_train_val_folders = False
-
-                # If train (and optionally val) folders are now available, ask to create class subfolders
-                if created_train_val_folders and os.path.exists(train_subdir):
-                    reply_classes = QMessageBox.question(self, '创建类别子文件夹?',
-                                                       f"您想在 'train' (以及 'val'，如果存在) 文件夹内\n"
-                                                       f"根据您提供的类别名称创建子文件夹吗?",
-                                                       QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
-                    if reply_classes == QMessageBox.Yes:
-                        class_names_str, ok = QInputDialog.getText(self, '输入类别名称',
-                                                                      '请输入类别名称，用英文逗号分隔 (例如: 猫,狗,鸟):')
-                        if ok and class_names_str:
-                            class_names = [name.strip() for name in class_names_str.split(',') if name.strip()]
-                            if class_names:
-                                for class_name in class_names:
-                                    try:
-                                        os.makedirs(os.path.join(train_subdir, class_name), exist_ok=True)
-                                        if os.path.exists(val_subdir): # Also create in val if it exists
-                                            os.makedirs(os.path.join(val_subdir, class_name), exist_ok=True)
-                                    except Exception as e:
-                                        self.log_message(f"为类别 '{class_name}' 创建子文件夹失败: {e}")
-                                        QMessageBox.warning(self, "创建错误", f"为类别 '{class_name}' 创建子文件夹时出错: {e}")
-                                        break # Stop if one fails
-                                else:
-                                    self.log_message(f"已在 'train' (和 'val') 文件夹中为类别 {class_names} 创建了子文件夹。")
-                                    QMessageBox.information(self, "完成", "类别子文件夹已创建。")
-                            else:
-                                QMessageBox.warning(self, "输入无效", "未提供有效的类别名称。")
-
-            # 自动同步到设置页
-            from ui.main_window import MainWindow
-            main_window = self.parentWidget()
-            while main_window and not isinstance(main_window, MainWindow):
-                main_window = main_window.parentWidget()
-            if main_window and hasattr(main_window, 'settings_tab'):
-                settings_tab = main_window.settings_tab
-                # 根据line_edit对象同步到对应设置项
-                if line_edit is self.train_images_edit:
-                    settings_tab.default_train_images_edit.setText(dir_path)
-                elif line_edit is self.train_labels_edit:
-                    settings_tab.default_train_labels_edit.setText(dir_path)
-                elif line_edit is self.val_images_edit:
-                    settings_tab.default_val_images_edit.setText(dir_path)
-                elif line_edit is self.val_labels_edit:
-                    settings_tab.default_val_labels_edit.setText(dir_path)
-                # 实时保存
-                settings_tab.save_settings()
-    
     def validate_dataset(self):
         """Validate the dataset structure and image-label matching."""
         # Get the directory paths
@@ -817,10 +911,9 @@ class TrainingTab(QWidget):
         self.update_fine_tuning_state() 
 
     def on_model_selection_changed(self, model_name):
-        self.model_type = model_name # Store raw model name, e.g., "yolov8n-cls"
-        self.log_message(f"已选择模型: {model_name}") # Log the raw name
-        # print(f"Model selection changed to (raw): {self.model_type}") # Keep for debugging if needed
-        self.update_fine_tuning_state() # Ensure fine-tuning state is updated based on new model selection
+        self.model_type = model_name # e.g. yolov8n.pt or yolov8n (if from scratch)
+        self.log_message(f"模型类型更改为: {model_name}")
+        # No direct action here, state is handled by update_model_source_ui_state and start_training
 
     def update_model_list(self):
         self.model_combo.blockSignals(True)
@@ -876,54 +969,73 @@ class TrainingTab(QWidget):
             self.model_type = "" # No models available
     
     def on_task_type_changed(self, index):
-        if index == 0: # Detection
-            self.task_type = "detect"
-        elif index == 1: # Classification
-            self.task_type = "classify"
-        else:
-            self.task_type = "detect" # Default or handle error
-        
-        self.update_model_list()
+        self.task_type = "detect" if index == 0 else "classify"
         self.update_task_specific_ui()
+        self.update_model_list()  # Update model list based on task type
+        self.update_parameters_display() # Update displayed parameters for the new task
 
     def update_task_specific_ui(self):
-        if self.task_type == "detect":
-            self.data_group.setTitle("数据集 (目标检测)")
-            self.train_images_label.setText("训练图像目录:")
-            self.train_labels_label.setText("训练标签目录:")
-            self.train_labels_edit.setEnabled(True)
-            self.train_labels_btn.setEnabled(True)
-            
-            self.val_images_label.setText("验证图像目录:")
-            self.val_labels_label.setText("验证标签目录:")
-            self.val_labels_edit.setEnabled(True)
-            self.val_labels_btn.setEnabled(True)
-            
-            # Enable fine-tuning for detection
-            self.fine_tuning_mode.setEnabled(True)
-            self.fine_tuning_mode.setText("微调模式（冻结骨干网络，仅训练检测头）")
-
-        elif self.task_type == "classify":
-            self.data_group.setTitle("数据集 (图像分类)")
-            self.train_images_label.setText("训练集根目录 (包含类别子文件夹):")
-            self.train_labels_label.setText("训练标签目录 (自动从文件夹结构推断):")
-            self.train_labels_edit.setEnabled(False)
-            self.train_labels_btn.setEnabled(False)
-            self.train_labels_edit.setText("") # Clear if previously set
-            
-            self.val_images_label.setText("验证集根目录 (包含类别子文件夹):")
-            self.val_labels_label.setText("验证标签目录 (自动从文件夹结构推断):")
-            self.val_labels_edit.setEnabled(False)
-            self.val_labels_btn.setEnabled(False)
-            self.val_labels_edit.setText("") # Clear if previously set
-
-            # Fine-tuning might have different meaning or not be applicable in the same way for classification
-            # Or it might mean freezing feature extractor layers.
-            # For now, let's make it more generic or disable if not directly translatable.
-            self.fine_tuning_mode.setEnabled(True) # Or False, depending on how you want to handle it
-            self.fine_tuning_mode.setText("微调模式（例如，冻结部分层，仅训练分类器）")
-            # You might also want to adjust available models in self.model_combo here
-            # or ensure it's called after self.task_type is set.
+        """Update UI elements specific to detection or classification tasks."""
+        is_detection = self.task_type == "detect"
+        self.data_group.setTitle("数据集 (目标检测)" if is_detection else "数据集 (图像分类)")
+        self.train_images_label.setText("训练图像目录:" if is_detection else "训练集根目录 (包含类别子文件夹):")
+        self.train_labels_label.setText("训练标签目录:" if is_detection else "训练标签目录 (自动从文件夹结构推断):")
+        self.train_labels_edit.setEnabled(is_detection)
+        self.train_labels_btn.setEnabled(is_detection)
         
+        self.val_images_label.setText("验证图像目录:" if is_detection else "验证集根目录 (包含类别子文件夹):")
+        self.val_labels_label.setText("验证标签目录:" if is_detection else "验证标签目录 (自动从文件夹结构推断):")
+        self.val_labels_edit.setEnabled(is_detection)
+        self.val_labels_btn.setEnabled(is_detection)
+        
+        # Enable fine-tuning for detection
+        self.fine_tuning_mode.setEnabled(is_detection)
+        self.fine_tuning_mode.setText("微调模式（冻结骨干网络，仅训练检测头）" if is_detection else "微调模式（例如，冻结部分层，仅训练分类器）")
+
         # This will trigger an update to the model list based on the new task type
         self.update_model_list() 
+
+    def parse_hyperparameters(self, hyperparameters_str):
+        """Parse hyperparameters from text input into a dictionary."""
+        params = {}
+        if not hyperparameters_str:
+            return params
+            
+        for line in hyperparameters_str.strip().split('\n'):
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+                
+            try:
+                key, value = line.split('=', 1)
+                key = key.strip()
+                value = value.strip()
+                
+                # Try to convert value to appropriate type
+                try:
+                    if value.lower() == 'true':
+                        value = True
+                    elif value.lower() == 'false':
+                        value = False
+                    elif '.' in value:
+                        value = float(value)
+                    else:
+                        value = int(value)
+                except ValueError:
+                    # Keep as string if conversion fails
+                    pass
+                    
+                params[key] = value
+            except ValueError:
+                self.log_message(f"Warning: Invalid hyperparameter line: {line}")
+                continue
+                
+        return params
+
+    def on_model_source_changed(self):
+        """Handles changes in model source selection (download vs. local)."""
+        self.update_model_source_ui_state()
+
+    def on_model_source_changed(self):
+        """Handles changes in model source selection (download vs. local)."""
+        self.update_model_source_ui_state() 

@@ -45,10 +45,8 @@ class SettingsTab(QWidget):
         
         # Load settings if available
         self.settings_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data', 'settings.json')
-        self.load_settings()
-        
-        # Set up UI
         self.setup_ui()
+        self.load_settings()
     
     def setup_ui(self):
         """Create and arrange UI elements."""
@@ -81,16 +79,15 @@ class SettingsTab(QWidget):
         model_group = QGroupBox("默认模型设置")
         model_layout = QFormLayout()
         
-        self.model_combo = QComboBox()
-        self.model_combo.addItems(["yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x",
-                                  "yolov5n", "yolov5s", "yolov5m", "yolov5l", "yolov5x",
-                                  "yolo12n", "yolo12s", "yolo12m", "yolo12l", "yolo12x"])
-        index = self.model_combo.findText(self.settings['default_model'])
-        if index >= 0:
-            self.model_combo.setCurrentIndex(index)
-        
-        model_layout.addRow("默认模型:", self.model_combo)
-        model_group.setLayout(model_layout)
+        # self.model_combo = QComboBox()
+        # self.model_combo.addItems(["yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x",
+        #                           "yolov5n", "yolov5s", "yolov5m", "yolov5l", "yolov5x",
+        #                           "yolo12n", "yolo12s", "yolo12m", "yolo12l", "yolo12x"])
+        # index = self.model_combo.findText(self.settings['default_model'])
+        # if index >= 0:
+        #     self.model_combo.setCurrentIndex(index)
+        # model_layout.addRow("默认模型:", self.model_combo)
+        # model_group.setLayout(model_layout)
 
         # UI settings group
         ui_group = QGroupBox("界面设置")
@@ -114,7 +111,7 @@ class SettingsTab(QWidget):
         
         # Add groups to general tab
         general_layout.addWidget(hardware_group)
-        general_layout.addWidget(model_group)
+        # general_layout.addWidget(model_group) # 注释掉默认模型设置
         general_layout.addWidget(ui_group)
         
         # Path settings tab
@@ -385,7 +382,7 @@ class SettingsTab(QWidget):
     def save_settings(self):
         """Save current settings to file and emit signal to update other tabs."""
         # Update settings dict from UI
-        self.settings['default_model'] = self.model_combo.currentText()
+        # self.settings['default_model'] = self.model_combo.currentText()  # 已无model_combo，注释掉
         self.settings['default_batch_size'] = self.batch_size_spin.value()
         self.settings['default_img_size'] = self.img_size_spin.value()
         self.settings['default_conf_thresh'] = self.conf_thresh_spin.value()
@@ -440,14 +437,10 @@ class SettingsTab(QWidget):
             try:
                 with open(self.settings_file, 'r') as f:
                     loaded_settings = json.load(f)
-                
-                # Update settings with loaded values
                 for key, value in loaded_settings.items():
                     if key in self.settings:
                         self.settings[key] = value
-                
-                # Update UI
-                self.model_combo.setCurrentText(self.settings['default_model'])
+                # self.model_combo.setCurrentText(self.settings['default_model'])  # 已无model_combo，注释掉
                 self.batch_size_spin.setValue(self.settings['default_batch_size'])
                 self.img_size_spin.setValue(self.settings['default_img_size'])
                 self.conf_thresh_spin.setValue(self.settings['default_conf_thresh'])
@@ -487,9 +480,7 @@ class SettingsTab(QWidget):
             "你确定要将所有设置重置为默认值吗？",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No
         )
-        
         if reply == QMessageBox.Yes:
-            # Reset to default values
             self.settings = {
                 'default_model': 'yolov8n',
                 'default_batch_size': 16,
@@ -512,9 +503,7 @@ class SettingsTab(QWidget):
                 'default_test_images_dir': '',
                 'default_test_labels_dir': ''
             }
-            
-            # Update UI
-            self.model_combo.setCurrentText(self.settings['default_model'])
+            # self.model_combo.setCurrentText(self.settings['default_model'])  # 已无model_combo，注释掉
             self.batch_size_spin.setValue(self.settings['default_batch_size'])
             self.img_size_spin.setValue(self.settings['default_img_size'])
             self.conf_thresh_spin.setValue(self.settings['default_conf_thresh'])

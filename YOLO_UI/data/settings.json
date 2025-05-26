@@ -13,7 +13,7 @@
     "default_train_model_path": "D:/YOLO_UI/yolo12n.pt",
     "default_test_model_path": "D:/YOLO_UI/yolo_project/20250507-144157/weights/best.pt",
     "theme": "tech",
-    "default_train_images_dir": "D:/Do/modles/train",
+    "default_train_images_dir": "D:/Do/modles",
     "default_train_labels_dir": "D:/lyq/trainCode/train/labels",
     "default_val_images_dir": "D:/Do/modles/val",
     "default_val_labels_dir": "D:/lyq/trainCode/val/labels",
