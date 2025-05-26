@@ -1588,13 +1588,16 @@ class LabelingWidget(LabelDialog):
         # Add action to launch YOLO_UI
         launch_yolo_ui_action = utils.new_action(
             self,
-            self.tr("Launch YOLO UI"),
+            self.tr("YOLO一键训练"),
             self.launch_yolo_ui,
             "yolo", # Placeholder for an icon, can be updated later
-            self.tr("Launch YOLO_UI application"),
+            self.tr("启动 YOLO-UI 工具"),
             enabled=True,
         )
-        self.actions.tool = self.actions.tool + (launch_yolo_ui_action,)
+        # 添加到“工具”菜单下拉项
+        self.menus.tool.addAction(launch_yolo_ui_action)
+        # 移除底部工具栏中的YOLO-UI启动按钮
+        self.actions.tool = tuple(action for action in self.actions.tool if action != launch_yolo_ui_action)
 
         layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)

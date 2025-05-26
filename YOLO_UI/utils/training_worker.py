@@ -373,7 +373,7 @@ class TrainingWorker(QObject):
                 self._emit_training_complete(success=False, message=error_msg)
                 return
             
-            if self._stop_event.is_set() or (self._trainer_ref and getattr(self._trainer_ref, 'stop', False)):
+            if self._stop_event.is_set():
                 self.log_update.emit("训练被用户停止")
                 self._emit_training_complete(success=False, message="训练被用户停止。")
             else:

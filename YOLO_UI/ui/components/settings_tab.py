@@ -108,14 +108,14 @@ class SettingsTab(QWidget):
         # Initialize default settings
         self.settings = {
             'default_model': 'yolov8n',
-            'default_batch_size': 16,
-            'default_img_size': 640,
+            'default_batch_size': 4,
+            'default_img_size': 512,
             'default_conf_thresh': 0.25,
             'default_iou_thresh': 0.45,
             'use_gpu': True,
             'gpu_device': 0,
-            'default_train_dir': '',
-            'default_val_dir': '',
+            'default_train_dir': 'D:/Do/modles',
+            'default_val_dir': 'D:/Do/modles/val',
             'default_test_dir': '',
             'default_output_dir': '',
             'default_train_model_path': '',
@@ -583,14 +583,14 @@ class SettingsTab(QWidget):
         if reply == QMessageBox.Yes:
             self.settings = {
                 'default_model': 'yolov8n',
-                'default_batch_size': 16,
-                'default_img_size': 640,
+                'default_batch_size': 4,
+                'default_img_size': 512,
                 'default_conf_thresh': 0.25,
                 'default_iou_thresh': 0.45,
                 'use_gpu': True,
                 'gpu_device': 0,
-                'default_train_dir': '',
-                'default_val_dir': '',
+                'default_train_dir': 'D:/Do/modles',
+                'default_val_dir': 'D:/Do/modles/val',
                 'default_test_dir': '',
                 'default_output_dir': '',
                 'default_train_model_path': '',
@@ -761,7 +761,11 @@ class SettingsTab(QWidget):
             self.check_cuda_status()
             # 检查后再判断
             if torch.cuda.is_available():
-                QMessageBox.information(self, "CUDA 安装", message + "\nCUDA 已可用。")
+                QMessageBox.information(self, "CUDA 安装", message + "\nCUDA 已可用。\n将自动安装匹配的 PyTorch...")
+                # 自动安装匹配的 PyTorch
+                supported_version = self.get_supported_cuda_version()
+                pip_tag = self.get_pip_cuda_tag(supported_version or '12.3')
+                self.install_pip_torch(pip_tag)
             else:
                 QMessageBox.warning(self, "CUDA 安装", message + "\n但未检测到 CUDA 可用，建议重启电脑或使用 CPU 进行训练。")
                 self.cuda_status_label.setText("CUDA 状态: 不可用，建议重启或使用 CPU")
