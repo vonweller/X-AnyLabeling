@@ -6,6 +6,8 @@ import os
 import os.path as osp
 import re
 import shutil
+import subprocess
+import sys
 
 import cv2
 import numpy as np
@@ -1583,6 +1585,17 @@ class LabelingWidget(LabelDialog):
             run_all_images,
         )
 
+        # Add action to launch YOLO_UI
+        launch_yolo_ui_action = utils.new_action(
+            self,
+            self.tr("Launch YOLO UI"),
+            self.launch_yolo_ui,
+            "yolo", # Placeholder for an icon, can be updated later
+            self.tr("Launch YOLO_UI application"),
+            enabled=True,
+        )
+        self.actions.tool = self.actions.tool + (launch_yolo_ui_action,)
+
         layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
 
@@ -2094,6 +2107,30 @@ class LabelingWidget(LabelDialog):
     def about(self):
         about_dialog = AboutDialog(self)
         _ = about_dialog.exec_()
+
+    def launch_yolo_ui(self):
+        try:
+            yolo_ui_path = ""
+            if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+                # Running in a PyInstaller bundle
+                yolo_ui_path = osp.join(sys._MEIPASS, "YOLO_UI", "main.py")
+                # For bundled app, typically we'd run an executable or a script differently
+                # If main.py is bundled as data and needs python interpreter:
+                python_executable = sys.executable # Path to bundled python interpreter
+                subprocess.Popen([python_executable, yolo_ui_path])
+            else:
+                # Running as a normal script
+                yolo_ui_path = osp.abspath(osp.join(osp.dirname(__file__), "..", "..", "..", "YOLO_UI", "main.py"))
+                # Ensure the path uses correct separators for Popen
+                yolo_ui_path = osp.normpath(yolo_ui_path)
+                # It's a .py file, so it needs to be run with python
+                # Assuming 'python' is in PATH or using the same interpreter
+                python_executable = sys.executable # Or "python" if sys.executable is not appropriate
+                subprocess.Popen([python_executable, yolo_ui_path], cwd=osp.dirname(yolo_ui_path))
+            logger.info(f"Attempting to launch YOLO_UI from: {yolo_ui_path} with python: {python_executable}")
+        except Exception as e:
+            logger.error(f"Failed to launch YOLO_UI: {e}")
+            QMessageBox.critical(self, self.tr("Error"), self.tr("Failed to launch YOLO_UI: {}").format(str(e)))
 
     def loop_thru_labels(self):
         self.label_loop_count += 1
