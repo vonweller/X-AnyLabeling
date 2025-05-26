@@ -5,13 +5,15 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                             QPushButton, QFileDialog, QComboBox, QLineEdit, 
                             QSpinBox, QDoubleSpinBox, QGroupBox, QCheckBox, 
                             QMessageBox, QProgressBar, QTextEdit, QScrollArea,
-                            QRadioButton, QButtonGroup, QFormLayout, QSlider)
+                            QRadioButton, QButtonGroup, QFormLayout, QSlider,
+                            QInputDialog)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QUrl
 from PyQt5.QtGui import QColor, QFont, QDesktopServices
 
 from utils.training_worker import TrainingWorker
 from utils.data_validator import validate_yolo_dataset, inspect_dataset_structure
 from utils.theme_manager import ThemeManager
+from ultralytics.models import yolo # Import yolo for model list
 
 class TrainingTab(QWidget):
     """Tab for YOLO model training configuration and execution."""
@@ -23,8 +25,9 @@ class TrainingTab(QWidget):
         self.training_thread = None
         
         # Default settings
+        self.task_type = "detect" # "detect" or "classify"
         self.dataset_format = "YOLO"  # Default dataset format
-        self.model_type = "yolov8n"  # Default YOLO model
+        self.model_type = "yolov8n.pt"  # Default YOLO model, ensure .pt extension
         self.train_mode = "pretrained"  # Default to using pretrained weights
         
         # Default paths (will be updated from settings if available)
@@ -70,13 +73,25 @@ class TrainingTab(QWidget):
         layout.addWidget(scroll)
         
         # Initialize UI states
+        self.update_task_specific_ui() # Call this to set initial UI based on task
         self.update_fine_tuning_state()
         self.update_weights_path_state()
         
     def setup_ui(self, main_layout):
         """Create and arrange UI elements."""
+        # Task Type Selection
+        task_group = QGroupBox("任务类型")
+        task_layout = QHBoxLayout()
+        self.task_combo = QComboBox()
+        self.task_combo.addItems(["目标检测 (Detection)", "图像分类 (Classification)"])
+        self.task_combo.currentIndexChanged.connect(self.on_task_type_changed)
+        task_layout.addWidget(QLabel("选择任务:"))
+        task_layout.addWidget(self.task_combo)
+        task_group.setLayout(task_layout)
+        main_layout.addWidget(task_group)
+
         # Data section
-        data_group = QGroupBox("数据集")
+        self.data_group = QGroupBox("数据集") # Made data_group an instance variable
         data_layout = QFormLayout()
         data_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         
@@ -87,7 +102,8 @@ class TrainingTab(QWidget):
         self.train_images_btn = QPushButton("浏览...")
         self.train_images_layout.addWidget(self.train_images_edit)
         self.train_images_layout.addWidget(self.train_images_btn)
-        data_layout.addRow("训练图像目录:", self.train_images_layout)
+        self.train_images_label = QLabel("训练图像目录:") # Keep a reference to the label
+        data_layout.addRow(self.train_images_label, self.train_images_layout)
 
         self.train_labels_layout = QHBoxLayout()
         self.train_labels_edit = QLineEdit()
@@ -95,7 +111,8 @@ class TrainingTab(QWidget):
         self.train_labels_btn = QPushButton("浏览...")
         self.train_labels_layout.addWidget(self.train_labels_edit)
         self.train_labels_layout.addWidget(self.train_labels_btn)
-        data_layout.addRow("训练标签目录:", self.train_labels_layout)
+        self.train_labels_label = QLabel("训练标签目录:") # Keep a reference to the label
+        data_layout.addRow(self.train_labels_label, self.train_labels_layout)
 
         # Validation images and labels
         self.val_images_layout = QHBoxLayout()
@@ -104,7 +121,8 @@ class TrainingTab(QWidget):
         self.val_images_btn = QPushButton("浏览...")
         self.val_images_layout.addWidget(self.val_images_edit)
         self.val_images_layout.addWidget(self.val_images_btn)
-        data_layout.addRow("验证图像目录:", self.val_images_layout)
+        self.val_images_label = QLabel("验证图像目录:") # Keep a reference to the label
+        data_layout.addRow(self.val_images_label, self.val_images_layout)
 
         self.val_labels_layout = QHBoxLayout()
         self.val_labels_edit = QLineEdit()
@@ -112,10 +130,11 @@ class TrainingTab(QWidget):
         self.val_labels_btn = QPushButton("浏览...")
         self.val_labels_layout.addWidget(self.val_labels_edit)
         self.val_labels_layout.addWidget(self.val_labels_btn)
-        data_layout.addRow("验证标签目录:", self.val_labels_layout)
+        self.val_labels_label = QLabel("验证标签目录:") # Keep a reference to the label
+        data_layout.addRow(self.val_labels_label, self.val_labels_layout)
         
         # Add widgets to form layout
-        data_group.setLayout(data_layout)
+        self.data_group.setLayout(data_layout) # Use self.data_group
         
         # Model section
         model_group = QGroupBox("模型配置")
@@ -123,10 +142,7 @@ class TrainingTab(QWidget):
         
         # Model type selection
         self.model_combo = QComboBox()
-        self.model_combo.addItems(["yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x",
-                                  "yolov5n", "yolov5s", "yolov5m", "yolov5l", "yolov5x",
-                                  "yolo12n", "yolo12s", "yolo12m", "yolo12l", "yolo12x",
-                                  "yolo11n-obb", "yolo11s-obb", "yolo11m-obb", "yolo11l-obb", "yolo11x-obb"])
+        self.model_combo.currentTextChanged.connect(self.on_model_selection_changed)
         
         # Model Initialization Options
         init_group_box = QGroupBox("模型初始化")
@@ -250,7 +266,7 @@ class TrainingTab(QWidget):
         progress_group.setLayout(progress_layout)
         
         # Add all sections to main layout with proper spacing
-        main_layout.addWidget(data_group)
+        main_layout.addWidget(self.data_group)
         main_layout.addSpacing(10)
         main_layout.addWidget(model_group)
         main_layout.addSpacing(10)
@@ -352,45 +368,55 @@ class TrainingTab(QWidget):
         # Determine which training mode to use
         if self.custom_weights_radio.isChecked():
             # Custom weights mode
-            model_weights = self.model_path_edit.text()
-            if not model_weights:
+            model_weights_path = self.model_path_edit.text()
+            if not model_weights_path:
                 self.log_message("警告: 选择了自定义权重，但未指定权重文件")
                 QMessageBox.warning(self, "缺少输入", "使用自定义权重模式时，请选择模型权重文件。")
                 self.set_ui_enabled(True)
                 self.is_training = False
                 return
-            pretrained = False
+            # For custom weights, pretrained is False as we are providing specific weights.
+            # The model_type (e.g., yolov8n-cls) might still be relevant for architecture if weights are partial.
+            # However, Ultralytics typically infers architecture from .pt file itself.
+            # We pass the raw model_type, and the worker will use model_weights_path primarily.
+            current_model_type_for_worker = self.model_type # e.g., "yolov8n-cls"
+            use_pretrained_for_worker = False
+            model_weights_for_worker = model_weights_path
+            self.log_message(f"使用自定义权重: {model_weights_path} 为模型 {current_model_type_for_worker}")
+
         elif self.use_pretrained_radio.isChecked():
             # Pretrained weights mode
-            model_weights = None
-            pretrained = True
-            self.log_message("使用预训练权重初始化模型")
-        else:
+            current_model_type_for_worker = self.model_type # e.g., "yolov8n-cls"
+            use_pretrained_for_worker = True
+            model_weights_for_worker = None # Worker will handle forming "model_type.pt" for download/load
+            self.log_message(f"使用预训练权重初始化模型: {current_model_type_for_worker}")
+        else: # self.from_scratch_radio.isChecked()
             # Train from scratch mode
-            model_weights = None
-            pretrained = False
-            self.log_message("从头开始训练模型（不使用预训练权重）")
+            current_model_type_for_worker = self.model_type # e.g., "yolov8n-cls"
+            use_pretrained_for_worker = False
+            model_weights_for_worker = None # Worker will handle forming "model_type.yaml" for loading config
+            self.log_message(f"从头开始训练模型 (不使用预训练权重): {current_model_type_for_worker}")
         
         # Check if it's fine-tuning mode
         fine_tuning = self.fine_tuning_mode.isChecked()
-        if fine_tuning and not (self.use_pretrained_radio.isChecked() or model_weights):
-            self.log_message("警告: 微调模式需要预训练模型或自定义权重！已禁用微调")
+        if fine_tuning and not (self.use_pretrained_radio.isChecked() or self.custom_weights_radio.isChecked()):
+            self.log_message("警告: 微调模式需要预训练模型或自定义权重！已禁用微调。")
             fine_tuning = False
         
         # Create worker instance
         self.training_worker = TrainingWorker(
-            model_type=self.model_combo.currentText(),
+            model_type=current_model_type_for_worker, # Pass the base model type e.g., "yolov8n-cls"
+            task_type=self.task_type,
             train_dir=self.train_images_edit.text(),
-            val_dir=self.val_images_edit.text(),
+            val_dir=self.val_images_edit.text(), 
             output_dir=self.output_dir_edit.text(),
             project_name=self.project_name_edit.text(),
-            dataset_format=self.dataset_format,
             batch_size=self.batch_size_spin.value(),
             epochs=self.epochs_spin.value(),
             img_size=self.img_size_spin.value(),
             learning_rate=self.lr_spin.value(),
-            pretrained=pretrained,
-            model_weights=model_weights,
+            pretrained=use_pretrained_for_worker, # Explicitly pass the pretrained flag
+            model_weights=model_weights_for_worker, # Pass the path to custom weights, or None
             fine_tuning=fine_tuning
         )
         
@@ -492,20 +518,25 @@ class TrainingTab(QWidget):
     
     def validate_inputs(self):
         """Validate user inputs before starting training."""
-        # 检查训练图像和标签目录
+        # 检查训练图像目录
         if not self.train_images_edit.text():
-            QMessageBox.warning(self, "缺少输入", "请选择训练图像目录。")
+            QMessageBox.warning(self, "缺少输入", "请选择训练数据目录。")
             return False
-        if not self.train_labels_edit.text():
-            QMessageBox.warning(self, "缺少输入", "请选择训练标签目录。")
+
+        # 对于检测任务，标签目录是必需的
+        if self.task_type == "detect":
+            if not self.train_labels_edit.text():
+                QMessageBox.warning(self, "缺少输入", "目标检测任务请选择训练标签目录。")
+                return False
+            if not self.val_labels_edit.text() and self.val_images_edit.text(): # If val images are provided, labels are also needed for detection
+                QMessageBox.warning(self, "缺少输入", "目标检测任务请为验证集选择标签目录。")
+                return False
+
+        # 验证图像目录不是必须的，但如果提供了，其标签目录对于检测也是必须的
+        if not self.val_images_edit.text() and self.task_type == "detect" and self.val_labels_edit.text():
+            QMessageBox.warning(self, "输入不一致", "为验证集提供了标签目录但未提供图像目录。")
             return False
-        # 检查验证图像和标签目录
-        if not self.val_images_edit.text():
-            QMessageBox.warning(self, "缺少输入", "请选择验证图像目录。")
-            return False
-        if not self.val_labels_edit.text():
-            QMessageBox.warning(self, "缺少输入", "请选择验证标签目录。")
-            return False
+
         # 检查输出目录
         if not self.output_dir_edit.text():
             QMessageBox.warning(self, "缺少输入", "请选择输出目录。")
@@ -594,6 +625,83 @@ class TrainingTab(QWidget):
         dir_path = QFileDialog.getExistingDirectory(self, title)
         if dir_path:
             line_edit.setText(dir_path)
+
+            # Automatically create train/val subdirectories for classification task
+            if self.task_type == "classify" and line_edit is self.train_images_edit:
+                selected_path = dir_path
+                train_subdir = os.path.join(selected_path, "train")
+                val_subdir = os.path.join(selected_path, "val")
+                created_train_val_folders = False
+
+                # Check if 'train' and 'val' subdirectories are missing and the selected path is not itself 'train' or 'val'
+                if not os.path.exists(train_subdir) and \
+                   not os.path.exists(val_subdir) and \
+                   os.path.basename(selected_path).lower() not in ["train", "val"]:
+                    
+                    reply_train_val = QMessageBox.question(self, '创建训练/验证子目录?',
+                                                       f"您选择的目录 '{selected_path}' \n"
+                                                       f"不包含 'train' 和 'val' 子文件夹。\n\n"
+                                                       f"您希望自动创建它们以符合标准的分类数据集结构吗?",
+                                                       QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+                    
+                    if reply_train_val == QMessageBox.Yes:
+                        try:
+                            os.makedirs(train_subdir, exist_ok=True)
+                            os.makedirs(val_subdir, exist_ok=True)
+                            self.log_message(f"已在 '{selected_path}' 中创建 'train' 和 'val' 子文件夹。")
+                            created_train_val_folders = True
+                        except Exception as e:
+                            self.log_message(f"创建 train/val 子文件夹失败: {e}")
+                            QMessageBox.critical(self, "错误", f"创建 train/val 子文件夹失败: {e}")
+                elif os.path.exists(train_subdir) and os.path.exists(val_subdir):
+                    created_train_val_folders = True # They already exist
+                elif os.path.exists(train_subdir) and not os.path.exists(val_subdir):
+                    # If only train exists, ask to create val
+                    reply_val = QMessageBox.question(self, '创建验证子目录?', 
+                                                   f"目录 '{train_subdir}' 已存在，但 'val' 子文件夹缺失。\n"
+                                                   f"您希望创建 'val' 子文件夹吗?",
+                                                   QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+                    if reply_val == QMessageBox.Yes:
+                        try:
+                            os.makedirs(val_subdir, exist_ok=True)
+                            self.log_message(f"已在 '{selected_path}' 中创建 'val' 子文件夹。")
+                            created_train_val_folders = True # Now both should exist or train exists and val is created
+                        except Exception as e:
+                            self.log_message(f"创建 'val' 子文件夹失败: {e}")
+                            QMessageBox.critical(self, "错误", f"创建 'val' 子文件夹失败: {e}")
+                    else:
+                         # User chose not to create val, proceed if train exists
+                         created_train_val_folders = os.path.exists(train_subdir) 
+                else: # train doesn't exist, but val might (unlikely scenario, but handle)
+                    created_train_val_folders = False
+
+                # If train (and optionally val) folders are now available, ask to create class subfolders
+                if created_train_val_folders and os.path.exists(train_subdir):
+                    reply_classes = QMessageBox.question(self, '创建类别子文件夹?',
+                                                       f"您想在 'train' (以及 'val'，如果存在) 文件夹内\n"
+                                                       f"根据您提供的类别名称创建子文件夹吗?",
+                                                       QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+                    if reply_classes == QMessageBox.Yes:
+                        class_names_str, ok = QInputDialog.getText(self, '输入类别名称',
+                                                                      '请输入类别名称，用英文逗号分隔 (例如: 猫,狗,鸟):')
+                        if ok and class_names_str:
+                            class_names = [name.strip() for name in class_names_str.split(',') if name.strip()]
+                            if class_names:
+                                for class_name in class_names:
+                                    try:
+                                        os.makedirs(os.path.join(train_subdir, class_name), exist_ok=True)
+                                        if os.path.exists(val_subdir): # Also create in val if it exists
+                                            os.makedirs(os.path.join(val_subdir, class_name), exist_ok=True)
+                                    except Exception as e:
+                                        self.log_message(f"为类别 '{class_name}' 创建子文件夹失败: {e}")
+                                        QMessageBox.warning(self, "创建错误", f"为类别 '{class_name}' 创建子文件夹时出错: {e}")
+                                        break # Stop if one fails
+                                else:
+                                    self.log_message(f"已在 'train' (和 'val') 文件夹中为类别 {class_names} 创建了子文件夹。")
+                                    QMessageBox.information(self, "完成", "类别子文件夹已创建。")
+                            else:
+                                QMessageBox.warning(self, "输入无效", "未提供有效的类别名称。")
+
             # 自动同步到设置页
             from ui.main_window import MainWindow
             main_window = self.parentWidget()
@@ -617,50 +725,75 @@ class TrainingTab(QWidget):
         """Validate the dataset structure and image-label matching."""
         # Get the directory paths
         train_images_dir = self.train_images_edit.text()
-        train_labels_dir = self.train_labels_edit.text()
         val_images_dir = self.val_images_edit.text()
-        val_labels_dir = self.val_labels_edit.text()
-        
-        # Check if paths are provided
+
         if not train_images_dir:
-            QMessageBox.warning(self, "缺少路径", "请先选择训练图像目录")
+            QMessageBox.warning(self, "缺少路径", "请先选择训练数据目录")
             return
+
+        self.log_message(f"开始验证 {self.task_type} 数据集...")
+
+        if self.task_type == "detect":
+            train_labels_dir = self.train_labels_edit.text()
+            val_labels_dir = self.val_labels_edit.text()
+            if not train_labels_dir:
+                QMessageBox.warning(self, "缺少路径", "目标检测任务请提供训练标签目录。")
+                return
             
-        # Validate the training dataset
-        self.log_message("开始验证训练数据集...")
-        train_results = validate_yolo_dataset(train_images_dir, train_labels_dir)
-        
-        # Log the training validation results
-        self.log_message(f"训练数据集验证: {train_results['message']}")
-        
-        # If validation dataset is provided, validate it as well
-        if val_images_dir:
-            self.log_message("开始验证验证数据集...")
-            val_results = validate_yolo_dataset(val_images_dir, val_labels_dir)
-            self.log_message(f"验证数据集验证: {val_results['message']}")
-        
-        # Inspect dataset structure for more detailed information
-        if train_images_dir:
-            base_dir = os.path.dirname(os.path.dirname(train_images_dir))
-            structure_report = inspect_dataset_structure(base_dir)
-            self.log_message("\n数据集结构分析:\n" + structure_report)
-        
-        # Show summary result
-        if train_results["success"] and (not val_images_dir or (val_images_dir and val_results["success"])):
-            QMessageBox.information(self, "验证成功", "数据集结构验证通过，可以开始训练。\n\n详细信息已添加到日志。")
-        else:
-            validation_message = (
-                f"数据集验证发现以下问题:\n\n"
-                f"训练集: 找到 {train_results['total_images']} 张图片, 匹配 {train_results['matched_labels']} 个标签\n"
-            )
+            train_results = validate_yolo_dataset(train_images_dir, train_labels_dir)
+            self.log_message(f"训练数据集 (检测) 验证: {train_results['message']}")
+            if val_images_dir and not val_labels_dir:
+                QMessageBox.warning(self, "缺少路径", "目标检测任务请为验证集提供标签目录。")
+                return
+            if val_images_dir and val_labels_dir:
+                val_results = validate_yolo_dataset(val_images_dir, val_labels_dir)
+                self.log_message(f"验证数据集 (检测) 验证: {val_results['message']}")
+            else:
+                val_results = {"success": True} # No validation set to check against labels
             
+            # Inspect dataset structure for more detailed information
+            # This part might need adjustment if train_images_dir is not the root of images/labels structure
+            # base_dir_train = os.path.dirname(os.path.dirname(train_images_dir)) if 'images' in train_images_dir else os.path.dirname(train_images_dir)
+            # structure_report = inspect_dataset_structure(base_dir_train) # Assuming inspect_dataset_structure works with this base
+            # self.log_message("\n数据集结构分析 (检测):\n" + structure_report)
+
+            if train_results["success"] and val_results["success"]:
+                QMessageBox.information(self, "验证成功", "目标检测数据集验证通过。")
+            else:
+                QMessageBox.warning(self, "验证问题", "目标检测数据集验证失败，请检查日志。")
+
+        elif self.task_type == "classify":
+            # For classification, we check if train_images_dir (and val_images_dir if provided)
+            # contain subdirectories (which represent classes).
+            valid_train = False
+            if os.path.isdir(train_images_dir):
+                subdirs = [d for d in os.listdir(train_images_dir) if os.path.isdir(os.path.join(train_images_dir, d))]
+                if subdirs:
+                    self.log_message(f"训练数据集 (分类) 验证: 在 {train_images_dir} 中找到 {len(subdirs)} 个可能的类别子文件夹: {subdirs}")
+                    valid_train = True
+                else:
+                    self.log_message(f"训练数据集 (分类) 验证错误: {train_images_dir} 中未找到类别子文件夹。")
+            else:
+                self.log_message(f"训练数据集 (分类) 验证错误: {train_images_dir} 不是一个有效的目录。")
+
+            valid_val = True # Assume valid if not provided
             if val_images_dir:
-                validation_message += f"验证集: 找到 {val_results['total_images']} 张图片, 匹配 {val_results['matched_labels']} 个标签\n\n"
+                valid_val = False
+                if os.path.isdir(val_images_dir):
+                    subdirs_val = [d for d in os.listdir(val_images_dir) if os.path.isdir(os.path.join(val_images_dir, d))]
+                    if subdirs_val:
+                        self.log_message(f"验证数据集 (分类) 验证: 在 {val_images_dir} 中找到 {len(subdirs_val)} 个可能的类别子文件夹: {subdirs_val}")
+                        valid_val = True
+                    else:
+                        self.log_message(f"验证数据集 (分类) 验证错误: {val_images_dir} 中未找到类别子文件夹。")
+                else:
+                    self.log_message(f"验证数据集 (分类) 验证错误: {val_images_dir} 不是一个有效的目录。")
             
-            validation_message += "详细信息已添加到日志。请修正问题后重试。"
-            
-            QMessageBox.warning(self, "验证问题", validation_message)
-    
+            if valid_train and valid_val:
+                QMessageBox.information(self, "验证成功", "图像分类数据集结构初步检查通过。")
+            else:
+                QMessageBox.warning(self, "验证问题", "图像分类数据集结构检查失败，请确保目录包含类别子文件夹，并检查日志。")
+        
     def update_parameters_display(self):
         """Update UI parameters based on selected model."""
         model = self.model_combo.currentText()
@@ -677,8 +810,120 @@ class TrainingTab(QWidget):
         elif model.endswith('x'):  # extra large models
             self.batch_size_spin.setValue(4)
         
-        # Log model change
-        self.log_message(f"已选择模型: {model}")
+        # Log model change # This log is now slightly different as self.model_type won't have .pt yet
+        # self.log_message(f"已选择模型: {model}") # model here is raw from combobox
         
         # Update fine-tuning state in case model changed
         self.update_fine_tuning_state() 
+
+    def on_model_selection_changed(self, model_name):
+        self.model_type = model_name # Store raw model name, e.g., "yolov8n-cls"
+        self.log_message(f"已选择模型: {model_name}") # Log the raw name
+        # print(f"Model selection changed to (raw): {self.model_type}") # Keep for debugging if needed
+        self.update_fine_tuning_state() # Ensure fine-tuning state is updated based on new model selection
+
+    def update_model_list(self):
+        self.model_combo.blockSignals(True)
+        self.model_combo.clear()
+        
+        yolo_versions = ["8", "9", "10", "11", "12"]
+        yolo_sizes = ["n", "s", "m", "l", "x"]
+        
+        models = []
+
+        if self.task_type == "detect":
+            # Common detection models
+            for v in yolo_versions:
+                for s in yolo_sizes:
+                    models.append(f"yolov{v}{s}")
+            # Example: add OBB models if needed later
+            # models.extend([f"yolov{v}{s}-obb" for v in yolo_versions for s in yolo_sizes])
+
+        elif self.task_type == "classify":
+            # Common classification models
+            for v in yolo_versions:
+                for s in yolo_sizes:
+                    models.append(f"yolov{v}{s}-cls")
+            models.extend(["resnet18", "resnet34", "resnet50", "resnet101"]) # Keep other common classification backbones
+        else:
+            models = [] # Should not happen if task_type is always 'detect' or 'classify'
+
+        self.model_combo.addItems(models)
+        if models:
+             # Set default model based on task type
+            if self.task_type == "detect":
+                default_model_base = "yolov8n"
+            elif self.task_type == "classify":
+                default_model_base = "yolov8n-cls"
+            else:
+                default_model_base = models[0]
+
+            if default_model_base in models:
+                self.model_combo.setCurrentText(default_model_base)
+                # self.model_type is updated by on_model_selection_changed via setCurrentText signal
+            else: # Fallback if default_model_base is not in the list (e.g. empty models list)
+                if models: # Ensure models list is not empty
+                    self.model_combo.setCurrentIndex(0)
+                # self.model_type will be updated by on_model_selection_changed
+
+        self.model_combo.blockSignals(False)
+        # Trigger on_model_selection_changed to set self.model_type correctly for the initially selected/default model
+        if self.model_combo.count() > 0:
+            # When list updates, on_model_selection_changed will be called by setCurrentText or currentIndex change.
+            # Explicitly calling it here ensures self.model_type is set even if the first item doesn't change text.
+            self.on_model_selection_changed(self.model_combo.currentText())
+        else:
+            self.model_type = "" # No models available
+    
+    def on_task_type_changed(self, index):
+        if index == 0: # Detection
+            self.task_type = "detect"
+        elif index == 1: # Classification
+            self.task_type = "classify"
+        else:
+            self.task_type = "detect" # Default or handle error
+        
+        self.update_model_list()
+        self.update_task_specific_ui()
+
+    def update_task_specific_ui(self):
+        if self.task_type == "detect":
+            self.data_group.setTitle("数据集 (目标检测)")
+            self.train_images_label.setText("训练图像目录:")
+            self.train_labels_label.setText("训练标签目录:")
+            self.train_labels_edit.setEnabled(True)
+            self.train_labels_btn.setEnabled(True)
+            
+            self.val_images_label.setText("验证图像目录:")
+            self.val_labels_label.setText("验证标签目录:")
+            self.val_labels_edit.setEnabled(True)
+            self.val_labels_btn.setEnabled(True)
+            
+            # Enable fine-tuning for detection
+            self.fine_tuning_mode.setEnabled(True)
+            self.fine_tuning_mode.setText("微调模式（冻结骨干网络，仅训练检测头）")
+
+        elif self.task_type == "classify":
+            self.data_group.setTitle("数据集 (图像分类)")
+            self.train_images_label.setText("训练集根目录 (包含类别子文件夹):")
+            self.train_labels_label.setText("训练标签目录 (自动从文件夹结构推断):")
+            self.train_labels_edit.setEnabled(False)
+            self.train_labels_btn.setEnabled(False)
+            self.train_labels_edit.setText("") # Clear if previously set
+            
+            self.val_images_label.setText("验证集根目录 (包含类别子文件夹):")
+            self.val_labels_label.setText("验证标签目录 (自动从文件夹结构推断):")
+            self.val_labels_edit.setEnabled(False)
+            self.val_labels_btn.setEnabled(False)
+            self.val_labels_edit.setText("") # Clear if previously set
+
+            # Fine-tuning might have different meaning or not be applicable in the same way for classification
+            # Or it might mean freezing feature extractor layers.
+            # For now, let's make it more generic or disable if not directly translatable.
+            self.fine_tuning_mode.setEnabled(True) # Or False, depending on how you want to handle it
+            self.fine_tuning_mode.setText("微调模式（例如，冻结部分层，仅训练分类器）")
+            # You might also want to adjust available models in self.model_combo here
+            # or ensure it's called after self.task_type is set.
+        
+        # This will trigger an update to the model list based on the new task type
+        self.update_model_list() 
