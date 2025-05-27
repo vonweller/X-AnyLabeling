@@ -59,7 +59,7 @@ class MainWindow(QMainWindow):
         self.tab_widget.addTab(self.training_tab, "训练")
         self.tab_widget.addTab(self.testing_tab, "测试")
         self.tab_widget.addTab(self.inference_tab, "推理")
-        self.tab_widget.addTab(self.dataset_converter_tab, "数据集转换")
+        self.tab_widget.addTab(self.dataset_converter_tab, "数据集与模型转换")
         self.tab_widget.addTab(self.settings_tab, "设置")
         
         # 为标签页添加图标

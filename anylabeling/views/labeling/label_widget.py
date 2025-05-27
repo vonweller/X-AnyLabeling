@@ -12,7 +12,7 @@ import sys
 import cv2
 import numpy as np
 from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtCore import Qt, pyqtSlot
+from PyQt5.QtCore import Qt, pyqtSlot, QTimer
 from PyQt5.QtWidgets import (
     QDockWidget,
     QGridLayout,
@@ -1585,19 +1585,26 @@ class LabelingWidget(LabelDialog):
             run_all_images,
         )
 
-        # Add action to launch YOLO_UI
-        launch_yolo_ui_action = utils.new_action(
+        # 避免重复添加YOLO一键训练菜单项
+        for action in self.menus.tool.actions():
+            if action.text() == self.tr("YOLO一键训练"):
+                self.menus.tool.removeAction(action)
+                action.deleteLater()
+
+        # 使用utils.new_action创建动作
+        self.launch_yolo_ui_action = utils.new_action(
             self,
-            self.tr("YOLO一键训练"),
+            self.tr("&YOLO一键训练"),
             self.launch_yolo_ui,
-            "yolo", # Placeholder for an icon, can be updated later
-            self.tr("启动 YOLO-UI 工具"),
-            enabled=True,
+            icon="yolo",
+            tip=self.tr("启动 YOLO-UI 工具"),
         )
-        # 添加到“工具”菜单下拉项
-        self.menus.tool.addAction(launch_yolo_ui_action)
+        
+        # 添加到菜单
+        self.menus.tool.addAction(self.launch_yolo_ui_action)
+        
         # 移除底部工具栏中的YOLO-UI启动按钮
-        self.actions.tool = tuple(action for action in self.actions.tool if action != launch_yolo_ui_action)
+        self.actions.tool = tuple(action for action in self.actions.tool if action != self.launch_yolo_ui_action)
 
         layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
@@ -2112,6 +2119,7 @@ class LabelingWidget(LabelDialog):
         _ = about_dialog.exec_()
 
     def launch_yolo_ui(self):
+        print("YOLO一键训练菜单被点击")  # 调试用，观察信号是否触发
         try:
             yolo_ui_path = ""
             if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):

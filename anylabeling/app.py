@@ -163,7 +163,7 @@ def main():
     logger_level = config_from_args.pop("logger_level")
     logger.setLevel(getattr(logging, logger_level.upper()))
     logger.info(
-        f"🚀 {gradient_text(f'X-AnyLabeling v{__version__} launched!')}"
+        f"🚀 {gradient_text(f'VonwellAITools v{__version__} launched!')}"
     )
     logger.info(f"⭐ If you like it, give us a star: {__url__}")
     anylabeling_config.current_config_file = config_file_or_yaml
@@ -225,7 +225,14 @@ def main():
         win.settings.clear()
         sys.exit(0)
 
-    win.showMaximized()
+    # 设置默认窗口大小
+    win.resize(1200, 800)
+    # 将窗口移动到屏幕中央
+    screen = app.primaryScreen().geometry()
+    x = (screen.width() - win.width()) // 2
+    y = (screen.height() - win.height()) // 2
+    win.move(x, y)
+    win.show()
     win.raise_()
     sys.exit(app.exec())
 
