@@ -101,6 +101,17 @@ OnnxRunTime 库与 CUDA 版本不兼容，详情可参考[#844](https://github.c
 ### 模型相关问题
 
 <details>
+<summary>Q: Chatbot 中如何访问 'Google Gemini' 等需要外网访问的模型？</summary>
+
+可在当前终端或者系统配置文件中设置代理协议，其中 ip 和 port 替换为自己的网络协议地址和端口号：
+
+```bash
+export http_proxy=http://ip:port
+export https_proxy=http://ip:port
+```
+</details>
+
+<details>
 <summary>Q: ERROR | model_manager:predict_shapes:2031 - Error in predict_shapes: '<=' not supported between instances of 'int' and 'str'</summary>
 
 请检查模型配置文件（*.yaml）是否正确，具体可参考此[#902](https://github.com/CVHub520/X-AnyLabeling/issues/902)。
@@ -150,11 +161,6 @@ OnnxRunTime 库与 CUDA 版本不兼容，详情可参考[#844](https://github.c
 <summary>Q: 下载完的模型每次重新启动应用时都被自动删除重新下载</summary>
 
 - 注意模型路径不得有中文字符，否则会有异常。（[#600](https://github.com/CVHub520/X-AnyLabeling/issues/600)）
-- 如提示`Unsupported model IR version: 10, max supported IR version: 9`，则说明模型 IR 版本过高，请更新 onnx 版本：
-
-```bash
-pip install --upgrade onnx
-```
 </details>
 
 <details>
@@ -208,16 +214,15 @@ Error in predict_shapes: [ONNXRuntimeError] : 1 : FAIL : Non-zero status code re
 </details>
 
 <details>
-<summary>Q: Unsupported model IR version: 10, max supported IR version: 9</summary>
+<summary>Q: Unsupported model IR version: 11, max supported IR version: 10</summary>
 
-ONNX Runtime 版本过低，请更新：
+可参考以下解决方案：
 
-```shell
-# 安装 CPU 版本
-pip install --upgrade onnxruntime
-
-# 安装 GPU 版本
-pip install --upgrade onnxruntime-gpu
+```bash
+import onnx
+onnx_model = onnx.load("/path/to/your/onnx_model")
+model.ir_version = 10  # 修改为合适的版本号
+onnx.save("/path/to/onnx_model")
 ```
 </details>
 
