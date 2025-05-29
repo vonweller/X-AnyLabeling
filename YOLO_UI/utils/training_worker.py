@@ -11,6 +11,34 @@ UTILS_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_MODEL_CACHE_DIR = os.path.join(UTILS_DIR, "..", "data", "models")
 os.makedirs(DEFAULT_MODEL_CACHE_DIR, exist_ok=True)
 
+def check_ultralytics_version_compatibility(model_name):
+    """
+    检查ultralytics版本是否支持指定的模型
+    Args:
+        model_name (str): 模型名称，如 'yolo12n.pt'
+    Returns:
+        tuple: (is_compatible, version, error_message)
+    """
+    try:
+        import ultralytics
+        version_str = getattr(ultralytics, '__version__', 'unknown')
+        
+        # 检查是否为YOLO12模型
+        if 'yolo12' in model_name.lower():
+            try:
+                from packaging import version
+                if version.parse(version_str) < version.parse("8.3.0"):
+                    return False, version_str, f"YOLO12需要ultralytics>=8.3.0，当前版本: {version_str}"
+            except ImportError:
+                # 如果没有packaging库，尝试简单的字符串比较
+                if version_str.startswith('8.2') or version_str.startswith('8.1') or version_str.startswith('8.0'):
+                    return False, version_str, f"YOLO12需要ultralytics>=8.3.0，当前版本: {version_str}"
+        
+        return True, version_str, None
+        
+    except ImportError:
+        return False, 'not_installed', "ultralytics库未安装"
+
 class TrainingWorker(QObject):
     """Worker class to handle YOLO model training in a separate thread."""
     
@@ -136,7 +164,25 @@ class TrainingWorker(QObject):
             str: Path to the (potentially downloaded) model file, or None on failure.
         """
         try:
+            # 首先检查版本兼容性
+            is_compatible, version_str, error_msg = check_ultralytics_version_compatibility(model_name_to_download)
+            self.log_update.emit(f"Ultralytics版本: {version_str}")
+            
+            if not is_compatible:
+                self.log_update.emit(f"版本兼容性检查失败: {error_msg}")
+                if version_str == 'not_installed':
+                    self.training_error.emit(f"{error_msg}\n请安装ultralytics: pip install ultralytics")
+                else:
+                    self.training_error.emit(f"{error_msg}\n请升级ultralytics: pip install --upgrade ultralytics")
+                return None
+            
             from ultralytics import YOLO
+            
+            # 检查是否为YOLO12模型
+            is_yolo12 = 'yolo12' in model_name_to_download.lower()
+            if is_yolo12:
+                self.log_update.emit("检测到YOLO12模型，版本兼容性检查通过")
+            
             # 检查本地缓存
             cached_model_path = os.path.join(DEFAULT_MODEL_CACHE_DIR, model_name_to_download)
             
@@ -150,14 +196,13 @@ class TrainingWorker(QObject):
                 self.log_update.emit(f"无法下载 {model_name_to_download}: 无网络连接")
                 return None
 
-            # 设置下载进度回调
-            def download_progress_callback(current, total):
-                progress = int(current * 100 / total)
-                self.log_update.emit(f"下载进度: {progress}% ({current}/{total} bytes)")
-                self.progress_update.emit(progress)
-
             # 使用YOLO下载模型
             self.log_update.emit(f"开始下载模型 {model_name_to_download}...")
+            
+            # 对于YOLO12，添加特殊处理
+            if is_yolo12:
+                self.log_update.emit("使用YOLO12兼容模式下载...")
+            
             model_instance = YOLO(model_name_to_download)  # 这会触发下载
             
             # 获取下载后的模型路径，兼容ckpt为dict的情况
@@ -197,7 +242,27 @@ class TrainingWorker(QObject):
 
         except Exception as e:
             self.log_update.emit(f"下载模型时出错: {traceback.format_exc()}")
-            self.training_error.emit(f"下载模型失败: {model_name_to_download}, 错误: {e}\n建议：请前往Ultralytics官方模型发布页手动下载权重文件，并在本地加载。\nhttps://github.com/ultralytics/ultralytics-hub-models/releases")
+            
+            # 根据模型类型提供不同的错误信息和建议
+            if 'yolo12' in model_name_to_download.lower():
+                error_suggestion = (
+                    f"下载YOLO12模型失败: {model_name_to_download}, 错误: {e}\n"
+                    "建议解决方案:\n"
+                    "1. 确保ultralytics版本>=8.3.0: pip install --upgrade ultralytics\n"
+                    "2. 检查网络连接\n"
+                    "3. 手动下载模型文件: https://github.com/ultralytics/assets/releases\n"
+                    "4. 或使用本地模型文件选项"
+                )
+            else:
+                error_suggestion = (
+                    f"下载模型失败: {model_name_to_download}, 错误: {e}\n"
+                    "建议解决方案:\n"
+                    "1. 检查网络连接\n"
+                    "2. 手动下载模型文件: https://github.com/ultralytics/assets/releases\n"
+                    "3. 或使用本地模型文件选项"
+                )
+            
+            self.training_error.emit(error_suggestion)
             return None
 
     def _resolve_model_path(self):

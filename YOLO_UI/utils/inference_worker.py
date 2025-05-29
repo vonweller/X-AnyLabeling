@@ -78,10 +78,20 @@ class InferenceWorker(QObject):
     
     def load_model(self):
         """Load the YOLO model."""
-        self.log_update.emit("正在加载YOLO模型...")
+        self.log_update.emit("正在加载模型...")
+        
+        # 首先检查版本兼容性
+        is_compatible, version_str, error_msg = check_ultralytics_version_compatibility(self.model_path)
+        self.log_update.emit(f"Ultralytics版本: {version_str}")
+        
+        if not is_compatible:
+            self.log_update.emit(f"版本兼容性检查失败: {error_msg}")
+            if version_str == 'not_installed':
+                raise ValueError(f"{error_msg}\n请安装ultralytics: pip install ultralytics")
+            else:
+                raise ValueError(f"{error_msg}\n请升级ultralytics: pip install --upgrade ultralytics")
         
         try:
-            # Try to use Ultralytics YOLO
             import ultralytics
             from ultralytics import YOLO
             
@@ -626,4 +636,32 @@ class InferenceWorker(QObject):
             self.log_update.emit("类别分布:")
             for cls_name, count in sorted(detection_counts.items(), key=lambda x: x[1], reverse=True):
                 percentage = (count / total_detections) * 100 if total_detections > 0 else 0
-                self.log_update.emit(f"  {cls_name}: {count}个 ({percentage:.1f}%)") 
+                self.log_update.emit(f"  {cls_name}: {count}个 ({percentage:.1f}%)")
+
+def check_ultralytics_version_compatibility(model_name):
+    """
+    检查ultralytics版本是否支持指定的模型
+    Args:
+        model_name (str): 模型名称，如 'yolo12n.pt'
+    Returns:
+        tuple: (is_compatible, version, error_message)
+    """
+    try:
+        import ultralytics
+        version_str = getattr(ultralytics, '__version__', 'unknown')
+        
+        # 检查是否为YOLO12模型
+        if 'yolo12' in model_name.lower():
+            try:
+                from packaging import version
+                if version.parse(version_str) < version.parse("8.3.0"):
+                    return False, version_str, f"YOLO12需要ultralytics>=8.3.0，当前版本: {version_str}"
+            except ImportError:
+                # 如果没有packaging库，尝试简单的字符串比较
+                if version_str.startswith('8.2') or version_str.startswith('8.1') or version_str.startswith('8.0'):
+                    return False, version_str, f"YOLO12需要ultralytics>=8.3.0，当前版本: {version_str}"
+        
+        return True, version_str, None
+        
+    except ImportError:
+        return False, 'not_installed', "ultralytics库未安装" 
