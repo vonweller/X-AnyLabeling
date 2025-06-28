@@ -16,3 +16,4 @@ anylabeling/data
 anylabeling/app_info.py-*
 zipped_models/*
 venv/
+cuda_12.8.1_572.61_windows.exe

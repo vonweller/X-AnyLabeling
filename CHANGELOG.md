@@ -1,4 +1,5 @@
-# X-AnyLabeling Changelog
+
+X-AnyLabeling Changelog
 
 ## `v3.0.3` (May 28, 2025)
 
