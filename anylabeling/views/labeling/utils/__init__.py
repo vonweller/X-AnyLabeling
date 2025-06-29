@@ -43,6 +43,7 @@ from .qt import (
     new_action,
     new_button,
     new_icon,
+    on_thumbnail_click,
 )
 from .shape import (
     masks_to_bboxes,
@@ -56,6 +57,7 @@ from .upload import (
     upload_image_flags_file,
     upload_label_flags_file,
     upload_shape_attrs_file,
+    upload_label_classes_file,
     upload_yolo_annotation,
     upload_voc_annotation,
     upload_coco_annotation,

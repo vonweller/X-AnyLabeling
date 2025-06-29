@@ -183,29 +183,16 @@ You can create shapes using the tools in the left toolbar, the right-click conte
 
 ### 2.2 Editing Shapes
 
-X-AnyLabeling operates in two main modes:
+X-AnyLabeling provides two shape interaction modes:
 
-- **Drawing Mode**: Allows you to continuously create new shapes of the selected type.
-- **Editing Mode**: Allows you to select and modify existing shapes (move, resize, rotate, delete (`Delete`), undo (`Ctrl+Z`), copy (`Ctrl+C`), paste (`Ctrl+V`)).
+- **Drawing Mode** allows rapid creation of new shapes.
+- **Editing Mode** enables editing operations such as switching modes (`Ctrl+E`), undo (`Ctrl+Z`), copy (`Ctrl+C`), paste (`Ctrl+V`), delete (`Delete`), move, resize, and rotate.
 
-**Switching Modes:**
-- Select a drawing tool from the left toolbar to enter Drawing Mode for that shape type.
-- Press `Ctrl+E` to toggle Edit Mode on/off. Clicking an existing shape also typically enters Edit Mode.
+Press `Ctrl+J` to quickly switch between Drawing and Editing modes. Additional object-specific operations:
 
-**Editing Operations:**
-
-- **General**: Select shapes by clicking on them in Edit Mode. Hold `Shift` to select multiple shapes. Drag selected shapes to move them.
-- **Rectangles**: Resize by dragging corner or edge handles.
-- **Polygons**:
-    - In Edit Mode (`Ctrl+E`), drag an edge to add a new vertex.
-    - Hold `Shift` and click a vertex to remove it.
-    - Press `Ctrl+J` to enter a dedicated polygon point editing mode for fine-tuning vertex positions.
-- **Rotated Rectangles**: Select the shape and use `Z`, `X`, `C`, `V` keys to rotate it (check config/tooltips for rotation step/direction). The rotation angle is displayed in real-time (enable via View menu if needed).
-- **Merging Shapes**: Select multiple shapes, right-click, and choose `Merge Selected Objects` to create a single axis-aligned bounding rectangle around them.
-- **Selecting All Shapes on Canvas**:
-    1. Switch to Edit Mode (`Ctrl+E`).
-    2. Click any label in the `Label List` panel (usually on the right) to focus it.
-    3. Hold `Shift`, press `Home` (selects all shapes above the focused label), then press `End` (selects all shapes below).
+- **Rectangles**: You can drag a rectangle's corner handles to resize it, or select multiple rectangles and merge them using the right-click menu. Mouse wheel editing is also supported (disabled by default); when enabled via the `wheel_rectangle_editing` setting, scrolling inside the rectangle scales it, while scrolling outside adjusts the nearest edge.
+- **Polygons**: In Editing Mode, dragging an edge adds a new vertex, and holding `Shift` while clicking a vertex removes it. Polygons also support merging via the right-click menu.
+- **Rotated Rectangles**: Select a rotated rectangle and press `Z`, `X`, `C`, or `V` to rotate it in different directions. A real-time display of the rotation angle is available via the View menu.
 
 ### 2.3 Editing Labels
 
@@ -687,50 +674,40 @@ label_colors:
 
 ### 7.3 Predefined Labels
 
-To define a default list of labels that appear in the "Label List" panel when you start the application:
+To offer flexibility in label management and meet diverse usage scenarios, X-AnyLabeling supports not only loading labels via startup command-line arguments but also provides two additional convenient methods for loading predefined labels.
 
-1. Open the `.xanylabelingrc` file.
-2. Find or add the `labels:` section.
-3. List your desired default labels, one per line, preceded by a hyphen and space.
-4. **Important:** Enclose purely numeric label names in single quotes (e.g., `'1'`).
-5. Save the file and restart X-AnyLabeling.
+**Option 1: Set via Config File (Persistent)**
 
-Example:
-```YAML
-# ... other settings ...
+Edit the `labels` field in the config file to define your labels.
+Note: If a label is a number, wrap it in single quotes (`''`) to avoid parsing issues. For example:
+
+```yaml
 labels:
 - car
-- truck
-- bus
-- person
-- cyclist
-- '1'       # Numeric label needs quotes
-- traffic_light
-- _background_ # Common practice for some formats
-# ... other settings ...
+- '1'
+- '2'
+- 苹果
+- _phone
 ```
 
-### 7.4 Auto-Switch to Edit Mode
+**Option 2: Upload via Interface (Temporary)**
 
-Configure whether the tool automatically switches to Edit Mode after you finish drawing a shape (v2.4.0+):
+Create a simple `.txt` file with one label per line:
 
-1. Open `.xanylabelingrc`.
-2. Find the `auto_switch_to_edit_mode:` field.
-   - `true`: Switch to Edit Mode automatically after drawing a shape.
-   - `false`: Stay in Drawing Mode to create multiple shapes of the same type consecutively. Manual switch (`Ctrl+E` or clicking shape) needed to edit.
-3. Save and restart.
+```txt
+person
+car
+bicycle
+dog
+cat
+```
 
-### 7.5 Hover Auto-Highlight
+Then upload it through the menu: `Upload` → `Upload Label Classes File`.
 
-Configure whether shapes are automatically highlighted when you hover the mouse over them (v2.4.0+):
+🔔 **Tips:**
 
-1. Open `.xanylabelingrc`.
-2. Find the `auto_highlight_shape:` field.
-   - `true`: Highlight shapes instantly on mouse hover (makes selection easier).
-   - `false`: Require a click to select and highlight a shape.
-3. Save and restart.
-
-> **Note:** This is automatically set to `false` during multi-label classification tasks that use a property file, to prevent unintended selections while interacting with the property list.
+* Labels set via the config file are saved permanently and remain after restarting the software — ideal for fixed, long-term label sets.
+* Labels uploaded via the interface are temporary and reset after restarting — useful when frequently switching between different label sets.
 
 ### 7.6 Shape Appearance
 

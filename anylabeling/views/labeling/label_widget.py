@@ -28,6 +28,7 @@ from PyQt5.QtWidgets import (
 )
 
 from anylabeling.services.auto_labeling.types import AutoLabelingMode
+from anylabeling.services.auto_labeling import _THUMBNAIL_RENDER_MODELS
 
 from ...app_info import (
     __appname__,
@@ -201,14 +202,7 @@ class LabelingWidget(LabelDialog):
                 "Press 'Esc' to deselect."
             )
         )
-        if self._config["labels"]:
-            for label in self._config["labels"]:
-                item = self.unique_label_list.create_item_from_label(label)
-                self.unique_label_list.addItem(item)
-                rgb = self._get_rgb_by_label(label)
-                self.unique_label_list.set_item_label(
-                    item, label, rgb, LABEL_OPACITY
-                )
+        self.load_labels(self._config["labels"])
         self.label_dock = QtWidgets.QDockWidget(self.tr("Labels"), self)
         self.label_dock.setObjectName("Labels")
         self.label_dock.setWidget(self.unique_label_list)
@@ -234,6 +228,7 @@ class LabelingWidget(LabelDialog):
         file_list_widget = QtWidgets.QWidget()
         file_list_widget.setLayout(file_list_layout)
         self.file_dock.setWidget(file_list_widget)
+        self.file_dock.setStyleSheet("QDockWidget::title {" "text-align: center;" "padding: 0px;" "}")
 
         self.zoom_widget = ZoomWidget()
         self.setAcceptDrops(True)
@@ -243,6 +238,7 @@ class LabelingWidget(LabelDialog):
             epsilon=self._config["epsilon"],
             double_click=self._config["canvas"]["double_click"],
             num_backups=self._config["canvas"]["num_backups"],
+            wheel_rectangle_editing=self._config["canvas"]["wheel_rectangle_editing"],
         )
         self.canvas.zoom_request.connect(self.zoom_request)
 
@@ -992,6 +988,13 @@ class LabelingWidget(LabelDialog):
             icon="format_classify",
             tip=self.tr("Upload Custom Attributes File"),
         )
+        upload_label_classes_file = action(
+            self.tr("&Upload Label Classes File"),
+            lambda: utils.upload_label_classes_file(self),
+            None,
+            icon="format_classify",
+            tip=self.tr("Upload Custom Label Classes File"),
+        )
         upload_yolo_hbb_annotation = action(
             self.tr("&Upload YOLO-Hbb Annotations"),
             lambda: utils.upload_yolo_annotation(self, "hbb", LABEL_OPACITY),
@@ -1349,6 +1352,7 @@ class LabelingWidget(LabelDialog):
             upload_image_flags_file=upload_image_flags_file,
             upload_label_flags_file=upload_label_flags_file,
             upload_shape_attrs_file=upload_shape_attrs_file,
+            upload_label_classes_file=upload_label_classes_file,
             upload_yolo_hbb_annotation=upload_yolo_hbb_annotation,
             upload_yolo_obb_annotation=upload_yolo_obb_annotation,
             upload_yolo_seg_annotation=upload_yolo_seg_annotation,
@@ -1560,6 +1564,7 @@ class LabelingWidget(LabelDialog):
                 upload_image_flags_file,
                 upload_label_flags_file,
                 upload_shape_attrs_file,
+                upload_label_classes_file,
                 None,
                 upload_yolo_hbb_annotation,
                 upload_yolo_obb_annotation,
@@ -1749,6 +1754,12 @@ class LabelingWidget(LabelDialog):
         self.auto_labeling_widget.model_manager.prediction_finished.connect(
             lambda: self.canvas.set_loading(False)
         )
+        self.auto_labeling_widget.model_manager.prediction_finished.connect(
+            self.update_thumbnail_display
+        )
+        self.auto_labeling_widget.model_manager.model_loaded.connect(
+            self.update_thumbnail_display
+        )
         self.next_files_changed.connect(
             self.auto_labeling_widget.model_manager.on_next_files_changed
         )
@@ -1771,6 +1782,19 @@ class LabelingWidget(LabelDialog):
 
         right_sidebar_layout = QVBoxLayout()
         right_sidebar_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Thumbnail image display
+        self.thumbnail_pixmap = None
+        self.thumbnail_container = QWidget()
+        thumbnail_image_layout = QVBoxLayout()
+        thumbnail_image_layout.setContentsMargins(2, 2, 2, 2)
+        self.thumbnail_image_label = QLabel()
+        self.thumbnail_image_label.setAlignment(Qt.AlignCenter)
+        self.thumbnail_image_label.mousePressEvent = utils.on_thumbnail_click(self)
+        thumbnail_image_layout.addWidget(self.thumbnail_image_label)
+        self.thumbnail_container.setLayout(thumbnail_image_layout)
+        self.thumbnail_container.hide()
+        right_sidebar_layout.addWidget(self.thumbnail_container)
 
         # Shape attributes
         self.shape_attributes = QLabel(self.tr("Attributes"))
@@ -2845,6 +2869,30 @@ class LabelingWidget(LabelDialog):
         self.update_combo_box()
         self.update_gid_box()
 
+    def load_labels(self, labels, clear_existing=True):
+        """
+        Load labels to the unique label list widget.
+        
+        Args:
+            labels (list): List of label names to load
+            clear_existing (bool): Whether to clear existing labels before loading new ones
+        """
+        if not labels:
+            return
+
+        if clear_existing:
+            self.unique_label_list.clear()
+
+        for label in labels:
+            # Check if label already exists to avoid duplicates
+            if not self.unique_label_list.find_items_by_label(label):
+                item = self.unique_label_list.create_item_from_label(label)
+                self.unique_label_list.addItem(item)
+                rgb = self._get_rgb_by_label(label)
+                self.unique_label_list.set_item_label(
+                    item, label, rgb, LABEL_OPACITY
+                )
+
     def _update_shape_color(self, shape):
         r, g, b = self._get_rgb_by_label(shape.label)
         shape.line_color = QtGui.QColor(r, g, b)
@@ -3530,6 +3578,7 @@ class LabelingWidget(LabelDialog):
         self.canvas.setFocus()
         msg = str(self.tr("Loaded %s")) % osp.basename(str(filename))
         self.status(msg)
+        self.update_thumbnail_display()
         return True
 
     # QT Overload
@@ -3546,6 +3595,7 @@ class LabelingWidget(LabelDialog):
             and self.zoom_mode != self.MANUAL_ZOOM
         ):
             self.adjust_scale()
+        self.update_thumbnail_pixmap()
 
     def paint_canvas(self):
         assert not self.image.isNull(), "cannot paint null image"
@@ -4112,6 +4162,7 @@ class LabelingWidget(LabelDialog):
         else:
             self.auto_labeling_widget.show()
             self.actions.run_all_images.setEnabled(True)
+        self.update_thumbnail_display()
 
     @pyqtSlot()
     def new_shapes_from_auto_labeling(self, auto_labeling_result):
@@ -4395,3 +4446,43 @@ class LabelingWidget(LabelDialog):
         self.canvas.ungroup_selected_shapes()
         self.set_dirty()
         self.load_file(self.filename)
+
+    def update_thumbnail_pixmap(self):
+        if self.thumbnail_pixmap and not self.thumbnail_pixmap.isNull():
+            width = self.thumbnail_image_label.width()
+            if width > 0:
+                self.thumbnail_image_label.setPixmap(
+                    self.thumbnail_pixmap.scaledToWidth(
+                        width, QtCore.Qt.SmoothTransformation
+                    )
+                )
+
+    def update_thumbnail_display(self):
+        self.thumbnail_pixmap = None
+        self.thumbnail_image_label.clear()
+        self.thumbnail_container.hide()
+
+        model_config = self.auto_labeling_widget.model_manager.loaded_model_config
+        supported_model_list = list(_THUMBNAIL_RENDER_MODELS.keys())
+        if not (model_config and 
+                model_config.get("type") in supported_model_list and 
+                self.image_list):
+            return
+
+        try:
+            image_dir = osp.dirname(self.filename)
+            parent_dir = osp.dirname(image_dir)
+            base_name = osp.splitext(osp.basename(self.filename))[0]
+            save_dir, _thumbnail_file_ext = _THUMBNAIL_RENDER_MODELS[model_config["type"]]
+            thumbnail_dir = osp.join(parent_dir, save_dir)
+            thumbnail_path = osp.join(thumbnail_dir, base_name + _thumbnail_file_ext)
+            if not osp.exists(thumbnail_path):
+                return
+
+            self.thumbnail_pixmap = QtGui.QPixmap(thumbnail_path)
+            if not self.thumbnail_pixmap.isNull():
+                self.thumbnail_container.show()
+                self.update_thumbnail_pixmap()
+
+        except Exception as e:
+            logger.error(f"Failed to load thumbnail image: {str(e)}")

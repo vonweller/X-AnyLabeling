@@ -28,6 +28,7 @@ from anylabeling import config as anylabeling_config
 from anylabeling.views.mainwindow import MainWindow
 from anylabeling.views.labeling.logger import logger
 from anylabeling.views.labeling.utils import new_icon, gradient_text
+from anylabeling.views.labeling.utils.update_checker import check_for_updates_async
 
 # NOTE: Do not remove this import, it is required for loading translations
 from anylabeling.resources import resources
@@ -43,6 +44,11 @@ def main():
         default="info",
         choices=["debug", "info", "warning", "fatal", "error"],
         help="logger level",
+    )
+    parser.add_argument(
+        "--no-auto-update-check",
+        action="store_true",
+        help="disable automatic update check on startup",
     )
     parser.add_argument(
         "filename",
@@ -161,6 +167,8 @@ def main():
     output = config_from_args.pop("output")
     config_file_or_yaml = config_from_args.pop("config")
     logger_level = config_from_args.pop("logger_level")
+    no_auto_update_check = config_from_args.pop("no_auto_update_check", False)
+
     logger.setLevel(getattr(logging, logger_level.upper()))
     logger.info(
         f"🚀 {gradient_text(f'VonwellAITools v{__version__} launched!')}"

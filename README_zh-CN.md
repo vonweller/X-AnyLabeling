@@ -43,6 +43,10 @@ https://github.com/user-attachments/assets/52cbdb5d-cc60-4be5-826f-903ea4330ca8
 
 ## 🥳 新功能
 
+- 新增启动时自动更新检查
+- 新增矩形框鼠标滚轮缩放和边缘调整功能
+- 添加图形界面支持上传自定义标签集合
+- 新增图像抠图和深度估计任务的实时结果预览功能
 - 支持 `RMBG v2.0` 图像抠图模型
 - X-AnyLabeling [v3.0.3](https://github.com/CVHub520/X-AnyLabeling/releases/tag/v3.0.3) 最新版本发布
 - 更多详情，请参考[更新日志](./CHANGELOG.md)
@@ -132,13 +136,6 @@ https://github.com/user-attachments/assets/52cbdb5d-cc60-4be5-826f-903ea4330ca8
   - [GeCo](./examples/counting/geco/README.md)
 
 
-## 联系
-
-如果你觉得这个项目有帮助，请点亮右上角的⭐星标⭐。如有任何问题或疑问，欢迎[创建 issue](https://github.com/CVHub520/X-AnyLabeling/issues) 或发送邮件至 cv_hub@163.com。
-
-💡洽谈合作事项或想法共创，敬请添加微信: `ww10874` （非诚勿扰）
-
-
 ## 赞助
 
 | **微信支付** | **支付宝** |
@@ -149,9 +146,21 @@ https://github.com/user-attachments/assets/52cbdb5d-cc60-4be5-826f-903ea4330ca8
 感谢您的支持！
 
 
+## 贡献指南
+
+我们欢迎社区协作！**X‑AnyLabeling** 项目的成长离不开开发者们的共同参与，无论是修复 Bug、优化文档、还是添加新功能，您的贡献都非常宝贵。
+
+在参与前请阅读我们的 [贡献指南](./CONTRIBUTING.md)，并在提交 Pull Request 前确认您已同意 [贡献者许可协议 (CLA)](./CLA.md)。
+
+如果你觉得这个项目有帮助，请点亮右上角的⭐星标⭐。如有任何问题或疑问，欢迎[创建 issue](https://github.com/CVHub520/X-AnyLabeling/issues) 或发送邮件至 cv_hub@163.com。
+
+衷心感谢每一位为项目贡献力量的朋友 🙏
+
+
 ## 许可
 
-本项目采用 [GPL-3.0 开源许可证](./LICENSE)。
+本项目遵循 [GPL-3.0 license](./LICENSE) 协议，个人非商业用途可免费使用。若用于学术、科研或教学目的，也可免费使用，但请在[此处](https://forms.gle/MZCKhU7UJ4TRSWxR7)填写登记表。如计划将本项目用于商业或企业环境，请务必联系微信申请商业授权: `ww10874`。
+
 
 ## 引用
 
