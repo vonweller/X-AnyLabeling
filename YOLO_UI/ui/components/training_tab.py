@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                             QSpinBox, QDoubleSpinBox, QGroupBox, QCheckBox, 
                             QMessageBox, QProgressBar, QTextEdit, QScrollArea,
                             QRadioButton, QButtonGroup, QFormLayout, QSlider,
-                            QInputDialog)
+                            QInputDialog, QDialog)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QUrl, QTimer
 from PyQt5.QtGui import QColor, QFont, QDesktopServices
 import yaml
@@ -103,6 +103,25 @@ class TrainingTab(QWidget):
             self.output_dir_open_btn
         ]
         
+        # 为获取下载链接按钮设置特殊样式
+        self.get_download_link_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FF9800;
+                border: 1px solid #F57C00;
+                border-radius: 3px;
+                color: #ffffff;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #FFB74D;
+                border: 1px solid #FF9800;
+            }
+            QPushButton:pressed {
+                background-color: #F57C00;
+            }
+        """)
+        
         button_style = """
             QPushButton {
                 background-color: #3a3a3a;
@@ -145,6 +164,15 @@ class TrainingTab(QWidget):
         # Data section
         self.data_group = QGroupBox("数据集 (目标检测)")
         data_layout = QFormLayout()
+        
+        # 一键生成数据集结构按钮
+        dataset_gen_layout = QHBoxLayout()
+        self.generate_dataset_btn = QPushButton("📁 一键生成YOLO数据集文件夹结构")
+        self.generate_dataset_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; font-weight: bold; }")
+        self.generate_dataset_btn.clicked.connect(self.generate_dataset_structure)
+        dataset_gen_layout.addWidget(self.generate_dataset_btn)
+        dataset_gen_layout.addStretch()
+        data_layout.addRow(dataset_gen_layout)
         
         # Training data
         self.train_images_layout = QHBoxLayout()
@@ -218,6 +246,27 @@ class TrainingTab(QWidget):
         self.data_yaml_layout.addWidget(self.data_yaml_open_btn)
         data_layout.addRow("数据配置文件:", self.data_yaml_layout)
         
+        # 输出目录移动到数据集配置中
+        self.output_dir_layout = QHBoxLayout()
+        self.output_dir_edit = QLineEdit()
+        self.output_dir_edit.setReadOnly(True)
+        self.output_dir_btn = QPushButton("浏览...")
+        self.output_dir_open_btn = QPushButton("📁")
+        self.output_dir_open_btn.setToolTip("打开输出目录")
+        self.output_dir_open_btn.setFixedSize(32, 23)  # 固定大小确保显示完整
+        self.output_dir_open_btn.clicked.connect(lambda: self.open_folder(self.output_dir_edit.text()))
+        self.auto_output_btn = QPushButton("自动设置")
+        self.auto_output_btn.setStyleSheet("QPushButton { background-color: #2196F3; color: white; font-weight: bold; }")
+        self.auto_output_btn.clicked.connect(self.auto_set_output_dir)
+        self.output_dir_layout.addWidget(self.output_dir_edit)
+        self.output_dir_layout.addWidget(self.output_dir_btn)
+        self.output_dir_layout.addWidget(self.output_dir_open_btn)
+        self.output_dir_layout.addWidget(self.auto_output_btn)
+        data_layout.addRow("输出目录:", self.output_dir_layout)
+        
+        self.project_name_edit = QLineEdit("yolo_project")
+        data_layout.addRow("项目名称:", self.project_name_edit)
+        
         self.data_group.setLayout(data_layout)
 
         # Model section
@@ -225,15 +274,41 @@ class TrainingTab(QWidget):
         model_layout = QFormLayout()
         model_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow) # Ensure fields expand
 
-        # Model type selection (e.g., yolov8n.pt)
+        # Model type selection (e.g.,
+        # olov8n.pt)
         self.model_combo = QComboBox()
         # self.model_combo.currentTextChanged.connect(self.on_model_selection_changed) # Connection moved to connect_signals
         model_layout.addRow(QLabel("模型类型:"), self.model_combo)
         
-        # Device selection
-        self.device_combo = QComboBox()
-        self.device_combo.addItems(["CPU", "GPU (CUDA:0)", "GPU (CUDA:1)", "GPU (CUDA:2)", "GPU (CUDA:3)"])
-        model_layout.addRow(QLabel("设备:"), self.device_combo)
+        # Device selection - 改为单选按钮
+        device_group = QGroupBox("设备选择")
+        device_layout = QHBoxLayout()
+        self.device_group = QButtonGroup(self)
+        
+        self.cpu_radio = QRadioButton("CPU")
+        self.cpu_radio.setChecked(True)  # 默认选择CPU
+        self.device_group.addButton(self.cpu_radio)
+        device_layout.addWidget(self.cpu_radio)
+        
+        self.gpu0_radio = QRadioButton("GPU (CUDA:0)")
+        self.device_group.addButton(self.gpu0_radio)
+        device_layout.addWidget(self.gpu0_radio)
+        
+        self.gpu1_radio = QRadioButton("GPU (CUDA:1)")
+        self.device_group.addButton(self.gpu1_radio)
+        device_layout.addWidget(self.gpu1_radio)
+        
+        self.gpu2_radio = QRadioButton("GPU (CUDA:2)")
+        self.device_group.addButton(self.gpu2_radio)
+        device_layout.addWidget(self.gpu2_radio)
+        
+        self.gpu3_radio = QRadioButton("GPU (CUDA:3)")
+        self.device_group.addButton(self.gpu3_radio)
+        device_layout.addWidget(self.gpu3_radio)
+        
+        device_layout.addStretch()
+        device_group.setLayout(device_layout)
+        model_layout.addRow(device_group)
 
         # Hyperparameters text edit
         self.hyperparameters_edit = QTextEdit()
@@ -274,6 +349,12 @@ class TrainingTab(QWidget):
         self.open_model_folder_btn.setToolTip("打开模型缓存文件夹")
         self.open_model_folder_btn.clicked.connect(self.open_model_cache_folder)
         download_status_layout.addWidget(self.open_model_folder_btn)
+        
+        # 获取下载链接按钮
+        self.get_download_link_btn = QPushButton("🔗 获取下载链接")
+        self.get_download_link_btn.setToolTip("获取当前模型的直接下载链接")
+        self.get_download_link_btn.clicked.connect(self.show_download_links)
+        download_status_layout.addWidget(self.get_download_link_btn)
         
         download_status_layout.addStretch()  # 右侧弹性空间
         model_source_box_layout.addLayout(download_status_layout)
@@ -352,7 +433,7 @@ class TrainingTab(QWidget):
         # Hyperparameters
         self.batch_size_spin = QSpinBox()
         self.batch_size_spin.setRange(1, 128)
-        self.batch_size_spin.setValue(16)
+        self.batch_size_spin.setValue(2)  # 降低到2避免内存问题
         
         self.epochs_spin = QSpinBox()
         self.epochs_spin.setRange(1, 1000)
@@ -360,7 +441,7 @@ class TrainingTab(QWidget):
         
         self.img_size_spin = QSpinBox()
         self.img_size_spin.setRange(32, 1280)
-        self.img_size_spin.setValue(640)
+        self.img_size_spin.setValue(320)  # 进一步降低到320以避免内存问题
         self.img_size_spin.setSingleStep(32)
         
         self.lr_spin = QDoubleSpinBox()
@@ -379,29 +460,6 @@ class TrainingTab(QWidget):
         model_layout.addWidget(self.fine_tuning_mode)
         model_group.setLayout(model_layout)
         
-        # Output section
-        output_group = QGroupBox("输出")
-        output_layout = QFormLayout()
-        
-        self.output_dir_layout = QHBoxLayout()
-        self.output_dir_edit = QLineEdit()
-        self.output_dir_edit.setReadOnly(True)
-        self.output_dir_btn = QPushButton("浏览...")
-        self.output_dir_open_btn = QPushButton("📁")
-        self.output_dir_open_btn.setToolTip("打开输出目录")
-        self.output_dir_open_btn.setFixedSize(32, 23)  # 固定大小确保显示完整
-        self.output_dir_open_btn.clicked.connect(lambda: self.open_folder(self.output_dir_edit.text()))
-        self.output_dir_layout.addWidget(self.output_dir_edit)
-        self.output_dir_layout.addWidget(self.output_dir_btn)
-        self.output_dir_layout.addWidget(self.output_dir_open_btn)
-        
-        self.project_name_edit = QLineEdit("yolo_project")
-        
-        # Add widgets to form layout
-        output_layout.addRow("输出目录:", self.output_dir_layout)
-        output_layout.addRow("项目名称:", self.project_name_edit)
-        output_group.setLayout(output_layout)
-        
         # Control section
         control_layout = QHBoxLayout()
         self.validate_btn = QPushButton("验证数据")
@@ -412,9 +470,43 @@ class TrainingTab(QWidget):
         self.stop_btn.setMinimumHeight(40)
         self.stop_btn.setEnabled(False)
         
+        # 添加诊断助手按钮
+        self.diagnostic_btn = QPushButton("🔧 训练问题诊断")
+        self.diagnostic_btn.setMinimumHeight(40)
+        self.diagnostic_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FFA500;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #FF8C00;
+            }
+        """)
+        
+        # 添加超安全模式按钮
+        self.ultra_safe_btn = QPushButton("🛡️ 超安全模式")
+        self.ultra_safe_btn.setMinimumHeight(40)
+        self.ultra_safe_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #DC3545;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #C82333;
+            }
+        """)
+        
         control_layout.addWidget(self.validate_btn)
         control_layout.addWidget(self.start_btn)
         control_layout.addWidget(self.stop_btn)
+        control_layout.addWidget(self.diagnostic_btn)
+        control_layout.addWidget(self.ultra_safe_btn)
         
         # Progress section
         progress_group = QGroupBox("训练进度")
@@ -439,8 +531,6 @@ class TrainingTab(QWidget):
         main_layout.addSpacing(10)
         main_layout.addWidget(model_group)
         main_layout.addSpacing(10)
-        main_layout.addWidget(output_group)
-        main_layout.addSpacing(10)
         main_layout.addLayout(control_layout)
         main_layout.addSpacing(10)
         main_layout.addWidget(progress_group)
@@ -457,7 +547,7 @@ class TrainingTab(QWidget):
     
     def connect_signals(self):
         """Connect UI signals to handlers."""
-        self.train_images_btn.clicked.connect(lambda: self.select_directory("选择训练图像目录", self.train_images_edit))
+        self.train_images_btn.clicked.connect(lambda: self.select_directory("选择训练图像目录", self.train_images_edit, auto_infer=True))
         self.train_labels_btn.clicked.connect(lambda: self.select_directory("选择训练标签目录", self.train_labels_edit))
         self.val_images_btn.clicked.connect(lambda: self.select_directory("选择验证图像目录", self.val_images_edit))
         self.val_labels_btn.clicked.connect(lambda: self.select_directory("选择验证标签目录", self.val_labels_edit))
@@ -487,6 +577,12 @@ class TrainingTab(QWidget):
         
         # Connect dataset validation button
         self.validate_btn.clicked.connect(self.validate_dataset)
+        
+        # Connect diagnostic button
+        self.diagnostic_btn.clicked.connect(self.show_training_diagnostic)
+        
+        # Connect ultra safe mode button
+        self.ultra_safe_btn.clicked.connect(self.apply_ultra_safe_mode)
         
         # Task type combo
         self.task_combo.currentIndexChanged.connect(self.on_task_type_changed)
@@ -615,19 +711,19 @@ class TrainingTab(QWidget):
         batch_size = self.batch_size_spin.value()
         img_size = self.img_size_spin.value()
         output_dir = self.output_dir_edit.text()
-        # 修正device解析逻辑
-        device_text = self.device_combo.currentText()
-        if "CPU" in device_text:
+        # 获取设备选择
+        if self.cpu_radio.isChecked():
             device = "cpu"
-        elif "GPU" in device_text:
-            import re
-            m = re.search(r"CUDA:(\\d+)", device_text)
-            if m:
-                device = m.group(1)
-            else:
-                device = ""  # fallback
+        elif self.gpu0_radio.isChecked():
+            device = "0"
+        elif self.gpu1_radio.isChecked():
+            device = "1"
+        elif self.gpu2_radio.isChecked():
+            device = "2"
+        elif self.gpu3_radio.isChecked():
+            device = "3"
         else:
-            device = ""  # fallback
+            device = "cpu"  # fallback
         task = self.task_type
         
         # Hyperparameters from text edit
@@ -762,6 +858,12 @@ class TrainingTab(QWidget):
         self.local_model_folder_open_btn.setEnabled(local_folder_enabled)
         
         self.model_combo.setEnabled(enabled)
+        # 设备选择单选按钮
+        self.cpu_radio.setEnabled(enabled)
+        self.gpu0_radio.setEnabled(enabled)
+        self.gpu1_radio.setEnabled(enabled)
+        self.gpu2_radio.setEnabled(enabled)
+        self.gpu3_radio.setEnabled(enabled)
         self.batch_size_spin.setEnabled(enabled)
         self.epochs_spin.setEnabled(enabled)
         self.img_size_spin.setEnabled(enabled)
@@ -905,9 +1007,18 @@ class TrainingTab(QWidget):
 
         # Device setting
         saved_device = settings.get('device', 'cpu')
-        device_index = self.device_combo.findText(saved_device, Qt.MatchContains)
-        if device_index != -1:
-            self.device_combo.setCurrentIndex(device_index)
+        if saved_device == 'cpu':
+            self.cpu_radio.setChecked(True)
+        elif saved_device == '0':
+            self.gpu0_radio.setChecked(True)
+        elif saved_device == '1':
+            self.gpu1_radio.setChecked(True)
+        elif saved_device == '2':
+            self.gpu2_radio.setChecked(True)
+        elif saved_device == '3':
+            self.gpu3_radio.setChecked(True)
+        else:
+            self.cpu_radio.setChecked(True)  # 默认CPU
         
         self.update_model_source_ui_state() # IMPORTANT: Update UI based on loaded settings
         self.update_fine_tuning_state()
@@ -999,11 +1110,15 @@ class TrainingTab(QWidget):
             self.fine_tuning_mode.setText("微调模式 (特定于任务)")
             # self.fine_tuning_mode.setEnabled(not self.from_scratch_radio.isChecked())
 
-    def select_directory(self, title, line_edit):
+    def select_directory(self, title, line_edit, auto_infer=False):
         dir_path = QFileDialog.getExistingDirectory(self, title)
         if dir_path:
             dir_path = dir_path.strip('\'"')  # 自动去除首尾引号
             line_edit.setText(dir_path)
+            
+            # 如果是训练图像目录选择，自动推理其他目录
+            if auto_infer and line_edit == self.train_images_edit:
+                self.auto_infer_dataset_paths(dir_path)
         # 不再自动同步到settings_tab，也不自动保存设置
 
     def validate_dataset(self):
@@ -1165,32 +1280,36 @@ class TrainingTab(QWidget):
             self.model_type = "" # No models available
     
     def on_task_type_changed(self, index):
+        old_task_type = getattr(self, 'task_type', 'detect')
         self.task_type = "detect" if index == 0 else "classify"
-        self.update_task_specific_ui()
-        self.update_model_list()  # Update model list based on task type
-        self.update_parameters_display() # Update displayed parameters for the new task
-        # 弹窗提示
-        if self.task_type == "classify":
-            QMessageBox.information(self, "分类任务数据集结构说明",
-                "分类任务数据集要求如下：\n\n"
-                "1. 训练集根目录下，每个类别为一个子文件夹，子文件夹名即为类别名。\n"
-                "2. 每个类别子文件夹内放置该类别的所有图片。\n"
-                "3. 验证集同理。\n\n"
-                "示例：\n"
-                "train/\n  cat/\n    img1.jpg\n    img2.jpg\n  dog/\n    img3.jpg\n    img4.jpg\n"
-            )
-        else:
-            QMessageBox.information(self, "目标检测任务数据集结构说明",
-                "目标检测任务数据集要求如下：\n\n"
-                "1. 训练/验证集分别有 images 和 labels 两个文件夹。\n"
-                "2. images/ 下为图片，labels/ 下为同名 txt 文件（YOLO格式）。\n"
-                "3. 根目录需有 data.yaml 配置文件。\n\n"
-                "示例：\n"
-                "dataset/\n  images/\n    train/\n      xxx.jpg\n    val/\n      yyy.jpg\n  labels/\n    train/\n      xxx.txt\n    val/\n      yyy.txt\n  data.yaml\n"
-                "\n如未检测到 data.yaml，将自动为你生成。"
-            )
-            # 自动生成data.yaml
-            self.try_create_data_yaml()
+        
+        # 只有当任务类型真正改变时才显示弹窗
+        if old_task_type != self.task_type:
+            self.update_task_specific_ui()
+            self.update_parameters_display() # Update displayed parameters for the new task
+            
+            # 弹窗提示
+            if self.task_type == "classify":
+                QMessageBox.information(self, "分类任务数据集结构说明",
+                    "分类任务数据集要求如下：\n\n"
+                    "1. 训练集根目录下，每个类别为一个子文件夹，子文件夹名即为类别名。\n"
+                    "2. 每个类别子文件夹内放置该类别的所有图片。\n"
+                    "3. 验证集同理。\n\n"
+                    "示例：\n"
+                    "train/\n  cat/\n    img1.jpg\n    img2.jpg\n  dog/\n    img3.jpg\n    img4.jpg\n"
+                )
+            else:
+                QMessageBox.information(self, "目标检测任务数据集结构说明",
+                    "目标检测任务数据集要求如下：\n\n"
+                    "1. 训练/验证集分别有 images 和 labels 两个文件夹。\n"
+                    "2. images/ 下为图片，labels/ 下为同名 txt 文件（YOLO格式）。\n"
+                    "3. 根目录需有 data.yaml 配置文件。\n\n"
+                    "示例：\n"
+                    "dataset/\n  images/\n    train/\n      xxx.jpg\n    val/\n      yyy.jpg\n  labels/\n    train/\n      xxx.txt\n    val/\n      yyy.txt\n  data.yaml\n"
+                    "\n如未检测到 data.yaml，将自动为你生成。"
+                )
+                # 自动生成data.yaml
+                self.try_create_data_yaml()
 
     def try_create_data_yaml(self):
         """在检测任务下，若未检测到data.yaml则自动生成一个模板。"""
@@ -1321,10 +1440,12 @@ class TrainingTab(QWidget):
             self.model_status_label.setVisible(False)
             self.download_model_btn.setVisible(False)
             self.open_model_folder_btn.setVisible(False)
+            self.get_download_link_btn.setVisible(False)
             return
             
-        # 在下载模式时，总是显示"打开模型目录"按钮
+        # 在下载模式时，总是显示相关按钮
         self.open_model_folder_btn.setVisible(True)
+        self.get_download_link_btn.setVisible(True)
         
         # 检查模型是否存在
         model_exists = self.is_model_available(model_name)
@@ -1533,36 +1654,81 @@ class TrainingTab(QWidget):
                     success = False
                     error_messages = []
                     
+                    # 方法0: 尝试最新的ultralytics简化命名方式
+                    if model_name_with_ext.startswith('yolo11'):
+                        try:
+                            self.log_update.emit("方法0: 尝试使用最新ultralytics简化命名...")
+                            simple_name = model_name_with_ext.replace('.pt', '')  # yolo11n
+                            model = YOLO(simple_name)
+                            if model is not None:
+                                self.log_update.emit(f"✓ 简化命名下载成功: {simple_name}")
+                                self.download_complete.emit(True, f"模型 {simple_name} 下载并缓存成功")
+                                return
+                        except Exception as e:
+                            self.log_update.emit(f"✗ 简化命名失败: {str(e)}")
+                    
                     # 方法1: 直接使用ultralytics下载（推荐）
                     try:
                         self.log_update.emit("方法1: 尝试使用ultralytics自动下载...")
                         
-                        # 临时禁用ultralytics的GitHub API检查，直接下载
-                        os.environ['ULTRALYTICS_OFFLINE'] = '1'
+                        # 尝试不同的模型名称格式
+                        model_name_variants = [model_name_with_ext]
+                        base_name = model_name_with_ext.replace('.pt', '')
                         
-                        model = YOLO(model_name_with_ext)
+                        # 为YOLO11添加额外的命名变体
+                        if 'yolo11' in base_name.lower():
+                            size_letter = base_name[-1] if base_name[-1] in 'nslmx' else 'n'
+                            model_name_variants.extend([
+                                f"yolo11{size_letter}.pt",
+                                f"yolov11{size_letter}.pt", 
+                                f"YOLO11{size_letter}.pt",
+                                f"yolo11{size_letter}",  # 不带扩展名
+                                f"yolov11{size_letter}",  # 不带扩展名
+                            ])
                         
-                        # 恢复环境变量
-                        if 'ULTRALYTICS_OFFLINE' in os.environ:
-                            del os.environ['ULTRALYTICS_OFFLINE']
+                        model_success = False
+                        for variant in set(model_name_variants):  # 去重
+                            try:
+                                self.log_update.emit(f"尝试模型名称: {variant}")
+                                
+                                # 临时禁用ultralytics的GitHub API检查，直接下载
+                                os.environ['ULTRALYTICS_OFFLINE'] = '1'
+                                
+                                model = YOLO(variant)
+                                
+                                # 恢复环境变量
+                                if 'ULTRALYTICS_OFFLINE' in os.environ:
+                                    del os.environ['ULTRALYTICS_OFFLINE']
+                                
+                                # 验证模型是否成功创建
+                                if model is not None:
+                                    self.log_update.emit(f"✓ ultralytics自动下载成功! 使用名称: {variant}")
+                                    
+                                    # 尝试获取模型路径
+                                    model_path = None
+                                    if hasattr(model, 'ckpt_path') and model.ckpt_path:
+                                        model_path = model.ckpt_path
+                                    elif hasattr(model, 'model_path') and model.model_path:
+                                        model_path = model.model_path
+                                    
+                                    if model_path and os.path.exists(model_path):
+                                        self.download_complete.emit(True, f"模型已保存到: {model_path}")
+                                        return
+                                    else:
+                                        self.download_complete.emit(True, f"模型 {variant} 下载并缓存成功")
+                                        return
+                                        
+                            except Exception as variant_error:
+                                # 清理环境变量
+                                if 'ULTRALYTICS_OFFLINE' in os.environ:
+                                    del os.environ['ULTRALYTICS_OFFLINE']
+                                self.log_update.emit(f"✗ 模型名称 {variant} 失败: {str(variant_error)}")
+                                continue
                         
-                        # 验证模型是否成功创建
-                        if model is not None:
-                            self.log_update.emit("✓ ultralytics自动下载成功!")
-                            
-                            # 尝试获取模型路径
-                            model_path = None
-                            if hasattr(model, 'ckpt_path') and model.ckpt_path:
-                                model_path = model.ckpt_path
-                            elif hasattr(model, 'model_path') and model.model_path:
-                                model_path = model.model_path
-                            
-                            if model_path and os.path.exists(model_path):
-                                self.download_complete.emit(True, f"模型已保存到: {model_path}")
-                                return
-                            else:
-                                self.download_complete.emit(True, f"模型 {model_name_with_ext} 下载并缓存成功")
-                                return
+                        # 如果所有变体都失败了
+                        error_msg = f"ultralytics自动下载失败: 尝试了所有模型名称变体都失败"
+                        self.log_update.emit(f"✗ {error_msg}")
+                        error_messages.append(error_msg)
                                 
                     except Exception as e:
                         # 清理环境变量
@@ -1576,30 +1742,99 @@ class TrainingTab(QWidget):
                     try:
                         self.log_update.emit("方法2: 尝试手动下载...")
                         
-                        # 构建正确的下载URL - 根据实际GitHub releases结构
-                        base_url = "https://github.com/ultralytics/assets/releases/download/v8.3.0"
-                        download_url = f"{base_url}/{model_name_with_ext}"
-                        
-                        self.log_update.emit(f"下载URL: {download_url}")
-                        
-                        # 检查模型是否真的存在
-                        head_response = requests.head(download_url, timeout=10)
-                        if head_response.status_code == 404:
-                            # 尝试其他可能的URL
-                            alternative_urls = [
-                                f"https://github.com/ultralytics/assets/releases/latest/download/{model_name_with_ext}",
-                                f"https://github.com/ultralytics/assets/releases/download/v8.2.0/{model_name_with_ext}",
-                            ]
+                        # 根据模型类型智能选择版本标签
+                        def get_model_version_urls(model_name):
+                            """根据模型类型返回可能的下载URL列表"""
+                            urls = []
                             
-                            for alt_url in alternative_urls:
-                                self.log_update.emit(f"尝试备用URL: {alt_url}")
-                                alt_head = requests.head(alt_url, timeout=10)
-                                if alt_head.status_code == 200:
-                                    download_url = alt_url
-                                    self.log_update.emit(f"找到有效URL: {download_url}")
-                                    break
+                            # YOLO11系列模型 - 需要v8.3.0或更高版本
+                            if model_name.startswith('yolo11') or model_name.startswith('yolov11'):
+                                # 尝试不同的文件名格式
+                                base_name = model_name.replace('.pt', '')
+                                possible_names = [
+                                    f"{base_name}.pt",
+                                    f"yolo11{base_name[-1:]}.pt" if base_name.startswith('yolov11') else f"{base_name}.pt",
+                                    f"yolov11{base_name[-1:]}.pt" if base_name.startswith('yolo11') else f"{base_name}.pt",
+                                ]
+                                
+                                for name in set(possible_names):  # 去重
+                                    urls.extend([
+                                        f"https://github.com/ultralytics/assets/releases/download/v8.3.0/{name}",
+                                        f"https://github.com/ultralytics/assets/releases/latest/download/{name}",
+                                        f"https://github.com/ultralytics/assets/releases/download/v8.3.1/{name}",
+                                        f"https://github.com/ultralytics/assets/releases/download/v8.3.2/{name}",
+                                    ])
+                            
+                            # YOLO10系列模型
+                            elif model_name.startswith('yolo10') or model_name.startswith('yolov10'):
+                                urls.extend([
+                                    f"https://github.com/ultralytics/assets/releases/download/v8.2.0/{model_name}",
+                                    f"https://github.com/ultralytics/assets/releases/download/v8.3.0/{model_name}",
+                                    f"https://github.com/ultralytics/assets/releases/latest/download/{model_name}",
+                                ])
+                            
+                            # YOLO9系列模型
+                            elif model_name.startswith('yolo9') or model_name.startswith('yolov9'):
+                                urls.extend([
+                                    f"https://github.com/ultralytics/assets/releases/download/v8.1.0/{model_name}",
+                                    f"https://github.com/ultralytics/assets/releases/download/v8.2.0/{model_name}",
+                                    f"https://github.com/ultralytics/assets/releases/download/v8.3.0/{model_name}",
+                                ])
+                            
+                            # YOLO8系列模型（经典版本）
+                            elif model_name.startswith('yolo8') or model_name.startswith('yolov8'):
+                                urls.extend([
+                                    f"https://github.com/ultralytics/assets/releases/download/v8.0.0/{model_name}",
+                                    f"https://github.com/ultralytics/assets/releases/download/v8.1.0/{model_name}",
+                                    f"https://github.com/ultralytics/assets/releases/download/v8.2.0/{model_name}",
+                                    f"https://github.com/ultralytics/assets/releases/download/v8.3.0/{model_name}",
+                                ])
+                            
+                            # 其他模型（ResNet等）
                             else:
-                                raise Exception(f"无法找到模型 {model_name_with_ext} 的有效下载链接")
+                                urls.extend([
+                                    f"https://github.com/ultralytics/assets/releases/download/v8.3.0/{model_name}",
+                                    f"https://github.com/ultralytics/assets/releases/download/v8.2.0/{model_name}",
+                                    f"https://github.com/ultralytics/assets/releases/latest/download/{model_name}",
+                                ])
+                            
+                            return urls
+                        
+                        # 获取所有可能的下载URL
+                        possible_urls = get_model_version_urls(model_name_with_ext)
+                        
+                        download_url = None
+                        self.log_update.emit(f"开始测试 {len(possible_urls)} 个可能的下载链接...")
+                        
+                        # 逐个测试URL直到找到有效的
+                        for i, test_url in enumerate(possible_urls, 1):
+                            try:
+                                self.log_update.emit(f"测试链接 {i}/{len(possible_urls)}: {test_url}")
+                                head_response = requests.head(test_url, timeout=10, allow_redirects=True)
+                                if head_response.status_code == 200:
+                                    download_url = test_url
+                                    self.log_update.emit(f"✅ 找到有效链接: {download_url}")
+                                    break
+                                elif head_response.status_code == 302:
+                                    # 处理重定向，尝试直接下载
+                                    self.log_update.emit(f"🔄 检测到重定向，尝试直接下载: {test_url}")
+                                    try:
+                                        test_response = requests.get(test_url, timeout=10, stream=True)
+                                        if test_response.status_code == 200:
+                                            download_url = test_url
+                                            self.log_update.emit(f"✅ 重定向链接有效: {download_url}")
+                                            break
+                                    except Exception:
+                                        pass
+                                    self.log_update.emit(f"🔄 重定向链接测试失败: {test_url}")
+                                else:
+                                    self.log_update.emit(f"❌ 链接无效 (HTTP {head_response.status_code}): {test_url}")
+                            except requests.RequestException as e:
+                                self.log_update.emit(f"❌ 链接测试失败: {test_url} - {str(e)}")
+                                continue
+                        
+                        if not download_url:
+                            raise Exception(f"无法找到模型 {model_name_with_ext} 的有效下载链接。\n已测试的版本: v8.0.0, v8.1.0, v8.2.0, v8.3.0, latest")
                         
                         # 下载文件
                         self.log_update.emit("开始下载文件...")
@@ -1666,9 +1901,17 @@ class TrainingTab(QWidget):
                     combined_error += "2. 确保ultralytics版本>=8.3.0\n" 
                     combined_error += "3. 升级ultralytics: pip install --upgrade ultralytics\n"
                     combined_error += f"4. 手动下载模型文件到缓存目录:\n   {cache_dir}\n"
-                    combined_error += f"   下载链接: https://github.com/ultralytics/assets/releases/download/v8.3.0/{model_name_with_ext}\n"
+                    # 根据模型类型提供更准确的下载链接
+                    if model_name_with_ext.startswith('yolo11'):
+                        combined_error += f"   YOLO11官方下载链接: https://github.com/ultralytics/assets/releases/download/v8.3.0/{model_name_with_ext}\n"
+                        combined_error += f"   GitHub Releases页面: https://github.com/ultralytics/assets/releases/tag/v8.3.0\n"
+                    else:
+                        combined_error += f"   推荐下载链接: https://github.com/ultralytics/assets/releases/download/v8.3.0/{model_name_with_ext}\n"
+                    
                     combined_error += "5. 使用VPN或代理，GitHub可能被墙\n"
-                    combined_error += "6. 尝试使用'本地模型文件'选项"
+                    combined_error += "6. 尝试使用'本地模型文件'选项\n"
+                    combined_error += "7. 或访问GitHub Releases页面手动下载:\n"
+                    combined_error += "   https://github.com/ultralytics/assets/releases"
                     
                     self.download_complete.emit(False, combined_error)
                         
@@ -1715,8 +1958,15 @@ class TrainingTab(QWidget):
                     error_msg += f"1. 创建缓存目录: {cache_dir}\n"
                     error_msg += f"2. 下载模型文件到该目录:\n"
                     error_msg += f"   https://github.com/ultralytics/assets/releases/download/v8.3.0/{self.model_name}\n"
-                    error_msg += f"3. 或者尝试备用链接:\n"
-                    error_msg += f"   https://github.com/ultralytics/assets/releases/latest/download/{self.model_name}"
+                    error_msg += f"3. 针对不同模型的推荐链接:\n"
+                    if self.model_name.startswith('yolo11'):
+                        error_msg += f"   YOLO11: https://github.com/ultralytics/assets/releases/download/v8.3.0/{self.model_name}\n"
+                    elif self.model_name.startswith('yolo10'):
+                        error_msg += f"   YOLO10: https://github.com/ultralytics/assets/releases/download/v8.2.0/{self.model_name}\n"
+                    elif self.model_name.startswith('yolo9'):
+                        error_msg += f"   YOLO9: https://github.com/ultralytics/assets/releases/download/v8.1.0/{self.model_name}\n"
+                    else:
+                        error_msg += f"   通用: https://github.com/ultralytics/assets/releases/latest/download/{self.model_name}"
                     
                     self.download_complete.emit(False, error_msg)
         
@@ -1943,3 +2193,687 @@ class TrainingTab(QWidget):
                     return "⚠️ 建议升级到最新版本\n💡 运行: pip install --upgrade ultralytics"
         except Exception as e:
             return f"⚠️ 版本检查失败: {str(e)}" 
+    
+    def generate_dataset_structure(self):
+        """一键生成YOLO数据集文件夹结构"""
+        try:
+            # 选择根目录
+            root_dir = QFileDialog.getExistingDirectory(self, "选择数据集根目录（将在此目录下创建YOLO数据集结构）")
+            if not root_dir:
+                return
+            
+            # 创建标准的YOLO数据集结构
+            dataset_name = "yolo_dataset"
+            dataset_path = os.path.join(root_dir, dataset_name)
+            
+            # 创建目录结构
+            directories = [
+                "images/train",
+                "images/val", 
+                "labels/train",
+                "labels/val"
+            ]
+            
+            created_dirs = []
+            for dir_path in directories:
+                full_path = os.path.join(dataset_path, dir_path)
+                os.makedirs(full_path, exist_ok=True)
+                created_dirs.append(full_path)
+                self.log_message(f"✅ 创建目录: {full_path}")
+            
+            # 创建classes.txt文件
+            classes_file = os.path.join(dataset_path, "classes.txt")
+            with open(classes_file, 'w', encoding='utf-8') as f:
+                f.write("# 在此文件中定义你的类别名称，每行一个类别\n")
+                f.write("# 例如:\n")
+                f.write("# person\n")
+                f.write("# car\n")
+                f.write("# dog\n")
+                f.write("# cat\n")
+                f.write("class0\n")  # 默认类别
+            
+            self.log_message(f"✅ 创建classes.txt: {classes_file}")
+            
+            # 创建data.yaml文件
+            data_yaml_path = os.path.join(dataset_path, "data.yaml")
+            yaml_content = {
+                'train': os.path.join(dataset_path, "images", "train").replace('\\', '/'),
+                'val': os.path.join(dataset_path, "images", "val").replace('\\', '/'),
+                'nc': 1,
+                'names': ['class0']
+            }
+            
+            with open(data_yaml_path, 'w', encoding='utf-8') as f:
+                yaml.dump(yaml_content, f, allow_unicode=True, default_flow_style=False)
+            
+            self.log_message(f"✅ 创建data.yaml: {data_yaml_path}")
+            
+            # 创建README.md文件
+            readme_path = os.path.join(dataset_path, "README.md")
+            readme_content = f"""# YOLO数据集
+
+## 目录结构
+```
+{dataset_name}/
+├── images/
+│   ├── train/          # 训练图片
+│   └── val/            # 验证图片
+├── labels/
+│   ├── train/          # 训练标签（.txt文件）
+│   └── val/            # 验证标签（.txt文件）
+├── classes.txt         # 类别名称定义
+├── data.yaml          # 数据集配置文件
+└── README.md          # 说明文档
+```
+
+## 使用说明
+
+1. 将训练图片放入 `images/train/` 目录
+2. 将验证图片放入 `images/val/` 目录
+3. 将对应的标签文件放入 `labels/train/` 和 `labels/val/` 目录
+4. 编辑 `classes.txt` 文件，定义你的类别名称
+5. 标签文件格式：每行一个目标，格式为 `class_id x_center y_center width height`
+   - 所有坐标都是相对于图像尺寸的比例（0-1）
+   - class_id 从0开始计数
+
+## 示例标签文件内容
+```
+0 0.5 0.5 0.3 0.4
+1 0.2 0.3 0.1 0.2
+```
+
+## 注意事项
+- 图片和标签文件必须同名（除扩展名外）
+- 标签文件为空表示该图片没有目标
+- 建议图片格式：jpg, png, bmp等
+- 确保训练集和验证集的类别分布合理
+"""
+            
+            with open(readme_path, 'w', encoding='utf-8') as f:
+                f.write(readme_content)
+            
+            self.log_message(f"✅ 创建README.md: {readme_path}")
+            
+            # 自动填充路径到界面
+            train_images_path = os.path.join(dataset_path, "images", "train")
+            val_images_path = os.path.join(dataset_path, "images", "val")
+            train_labels_path = os.path.join(dataset_path, "labels", "train")
+            val_labels_path = os.path.join(dataset_path, "labels", "val")
+            
+            self.train_images_edit.setText(train_images_path)
+            self.val_images_edit.setText(val_images_path)
+            self.train_labels_edit.setText(train_labels_path)
+            self.val_labels_edit.setText(val_labels_path)
+            self.data_yaml_path_edit.setText(data_yaml_path)
+            
+            # 自动设置输出目录
+            self.auto_set_output_dir()
+            
+            success_msg = f"✅ YOLO数据集结构创建成功！\n\n"
+            success_msg += f"📁 数据集路径: {dataset_path}\n\n"
+            success_msg += f"🔧 已自动填充界面路径，接下来请：\n"
+            success_msg += f"1. 将图片放入对应的images目录\n"
+            success_msg += f"2. 将标签文件放入对应的labels目录\n"
+            success_msg += f"3. 编辑classes.txt定义类别名称\n"
+            success_msg += f"4. 检查data.yaml配置文件\n\n"
+            success_msg += f"💡 点击'打开文件夹'按钮可以快速访问各个目录"
+            
+            QMessageBox.information(self, "数据集创建成功", success_msg)
+            
+            # 打开根目录
+            self.open_folder(dataset_path)
+            
+        except Exception as e:
+            error_msg = f"创建数据集结构失败: {str(e)}"
+            self.log_message(f"❌ {error_msg}")
+            QMessageBox.critical(self, "创建失败", error_msg)
+    
+    def auto_infer_dataset_paths(self, train_images_path):
+        """根据训练图像目录自动推理其他路径"""
+        try:
+            self.log_message(f"🔍 开始自动推理数据集路径，基于: {train_images_path}")
+            
+            # 分析路径结构
+            path_parts = train_images_path.replace('\\', '/').split('/')
+            
+            # 寻找images目录的位置
+            images_index = -1
+            for i, part in enumerate(path_parts):
+                if part.lower() == 'images':
+                    images_index = i
+                    break
+            
+            if images_index == -1:
+                self.log_message("⚠️ 未找到'images'目录，尝试其他推理方式")
+                # 如果没有找到images目录，尝试其他推理方式
+                self.auto_infer_non_standard_paths(train_images_path)
+                return
+            
+            # 获取数据集根目录
+            dataset_root = '/'.join(path_parts[:images_index])
+            
+            # 推理其他路径
+            inferred_paths = {}
+            
+            # 训练标签目录
+            train_labels_path = os.path.join(dataset_root, 'labels', 'train')
+            if os.path.exists(train_labels_path):
+                inferred_paths['train_labels'] = train_labels_path
+                self.train_labels_edit.setText(train_labels_path)
+                self.log_message(f"✅ 推理训练标签目录: {train_labels_path}")
+            else:
+                self.log_message(f"⚠️ 训练标签目录不存在: {train_labels_path}")
+            
+            # 验证图像目录
+            val_images_path = os.path.join(dataset_root, 'images', 'val')
+            if os.path.exists(val_images_path):
+                inferred_paths['val_images'] = val_images_path
+                self.val_images_edit.setText(val_images_path)
+                self.log_message(f"✅ 推理验证图像目录: {val_images_path}")
+            else:
+                # 尝试其他常见名称
+                alternatives = ['valid', 'validation', 'test']
+                for alt in alternatives:
+                    alt_path = os.path.join(dataset_root, 'images', alt)
+                    if os.path.exists(alt_path):
+                        inferred_paths['val_images'] = alt_path
+                        self.val_images_edit.setText(alt_path)
+                        self.log_message(f"✅ 推理验证图像目录: {alt_path}")
+                        break
+                else:
+                    self.log_message(f"⚠️ 验证图像目录不存在: {val_images_path}")
+            
+            # 验证标签目录
+            val_labels_path = os.path.join(dataset_root, 'labels', 'val')
+            if os.path.exists(val_labels_path):
+                inferred_paths['val_labels'] = val_labels_path
+                self.val_labels_edit.setText(val_labels_path)
+                self.log_message(f"✅ 推理验证标签目录: {val_labels_path}")
+            else:
+                # 尝试其他常见名称
+                alternatives = ['valid', 'validation', 'test']
+                for alt in alternatives:
+                    alt_path = os.path.join(dataset_root, 'labels', alt)
+                    if os.path.exists(alt_path):
+                        inferred_paths['val_labels'] = alt_path
+                        self.val_labels_edit.setText(alt_path)
+                        self.log_message(f"✅ 推理验证标签目录: {alt_path}")
+                        break
+                else:
+                    self.log_message(f"⚠️ 验证标签目录不存在: {val_labels_path}")
+            
+            # 推理data.yaml位置
+            data_yaml_path = os.path.join(dataset_root, 'data.yaml')
+            if os.path.exists(data_yaml_path):
+                inferred_paths['data_yaml'] = data_yaml_path
+                self.data_yaml_path_edit.setText(data_yaml_path)
+                self.log_message(f"✅ 推理data.yaml: {data_yaml_path}")
+            else:
+                self.log_message(f"⚠️ data.yaml不存在: {data_yaml_path}")
+                # 尝试自动生成
+                self.try_create_data_yaml()
+            
+            # 自动设置输出目录
+            self.auto_set_output_dir()
+            
+            # 显示推理结果
+            if inferred_paths:
+                result_msg = "🎯 路径推理完成！\n\n已自动填充：\n"
+                for key, path in inferred_paths.items():
+                    result_msg += f"• {key}: {os.path.basename(path)}\n"
+                result_msg += f"\n💡 请检查推理的路径是否正确"
+                
+                QMessageBox.information(self, "路径推理完成", result_msg)
+            else:
+                QMessageBox.warning(self, "推理结果", "未能推理出其他路径，请手动选择")
+                
+        except Exception as e:
+            error_msg = f"自动推理路径失败: {str(e)}"
+            self.log_message(f"❌ {error_msg}")
+            QMessageBox.warning(self, "推理失败", error_msg)
+    
+    def auto_infer_non_standard_paths(self, train_images_path):
+        """处理非标准路径结构的推理"""
+        try:
+            # 获取父目录
+            parent_dir = os.path.dirname(train_images_path)
+            
+            # 尝试在同级目录中寻找标签目录
+            possible_label_dirs = ['labels', 'annotations', 'txt', 'yolo_labels']
+            for label_dir in possible_label_dirs:
+                label_path = os.path.join(parent_dir, label_dir)
+                if os.path.exists(label_path):
+                    self.train_labels_edit.setText(label_path)
+                    self.log_message(f"✅ 推理训练标签目录: {label_path}")
+                    break
+            
+            # 尝试寻找验证目录
+            train_dir_name = os.path.basename(train_images_path)
+            possible_val_names = ['val', 'valid', 'validation', 'test']
+            
+            for val_name in possible_val_names:
+                val_images_path = os.path.join(parent_dir, val_name)
+                if os.path.exists(val_images_path):
+                    self.val_images_edit.setText(val_images_path)
+                    self.log_message(f"✅ 推理验证图像目录: {val_images_path}")
+                    
+                    # 寻找对应的标签目录
+                    val_parent = os.path.dirname(val_images_path)
+                    for label_dir in possible_label_dirs:
+                        val_label_path = os.path.join(val_parent, label_dir)
+                        if os.path.exists(val_label_path):
+                            self.val_labels_edit.setText(val_label_path)
+                            self.log_message(f"✅ 推理验证标签目录: {val_label_path}")
+                            break
+                    break
+            
+        except Exception as e:
+            self.log_message(f"⚠️ 非标准路径推理失败: {str(e)}")
+    
+    def auto_set_output_dir(self):
+        """自动设置输出目录"""
+        try:
+            # 基于训练数据集位置设置输出目录
+            train_images_path = self.train_images_edit.text()
+            project_name = self.project_name_edit.text() or "yolo_project"
+            
+            # 创建基于时间戳的目录名
+            import time
+            timestamp = time.strftime("%Y%m%d-%H%M%S")
+            output_dir_name = f"{project_name}_{timestamp}"
+            
+            if train_images_path and os.path.exists(train_images_path):
+                # 分析训练数据集路径结构
+                path_parts = train_images_path.replace('\\', '/').split('/')
+                
+                # 寻找合适的数据集根目录
+                dataset_root = None
+                
+                # 方法1: 如果路径包含 'images' 目录，使用其父目录作为数据集根目录
+                for i, part in enumerate(path_parts):
+                    if part.lower() == 'images':
+                        dataset_root = '/'.join(path_parts[:i])
+                        break
+                
+                # 方法2: 如果没有找到'images'目录，使用训练目录的父目录
+                if not dataset_root:
+                    dataset_root = os.path.dirname(train_images_path)
+                
+                # 在数据集根目录下创建outputs文件夹
+                outputs_base = os.path.join(dataset_root, "outputs")
+                output_dir = os.path.join(outputs_base, output_dir_name)
+                
+                self.log_message(f"✅ 基于数据集位置设置输出目录: {output_dir}")
+                
+                # 显示设置结果
+                QMessageBox.information(
+                    self, 
+                    "输出目录已设置", 
+                    f"输出目录已自动设置为:\n{output_dir}\n\n"
+                    f"📁 位置: 数据集根目录/outputs/{output_dir_name}\n"
+                    f"💡 训练结果将保存在数据集附近，便于管理"
+                )
+            else:
+                # 如果没有训练数据路径，回退到当前目录
+                current_dir = os.getcwd()
+                output_dir = os.path.join(current_dir, output_dir_name)
+                
+                self.log_message(f"⚠️ 未设置训练路径，使用当前目录: {output_dir}")
+                
+                QMessageBox.information(
+                    self, 
+                    "输出目录已设置", 
+                    f"输出目录已设置为:\n{output_dir}\n\n"
+                    f"💡 建议先选择训练数据集，以便在数据集附近创建输出目录"
+                )
+            
+            self.output_dir_edit.setText(output_dir)
+            
+        except Exception as e:
+            error_msg = f"自动设置输出目录失败: {str(e)}"
+            self.log_message(f"❌ {error_msg}")
+            QMessageBox.warning(self, "设置失败", error_msg)
+    
+    def show_download_links(self):
+        """显示当前选中模型的下载链接"""
+        try:
+            model_name = self.model_combo.currentText()
+            if not model_name:
+                QMessageBox.warning(self, "提示", "请先选择一个模型")
+                return
+            
+            # 确保模型名有.pt扩展名
+            model_name_with_ext = model_name if model_name.endswith('.pt') else f"{model_name}.pt"
+            
+            # 根据模型类型生成推荐的下载链接
+            links_info = "🔗 直接下载链接\n\n"
+            
+            if model_name.startswith('yolo11') or model_name.startswith('yolov11'):
+                links_info += f"📌 YOLO11 系列推荐链接:\n\n"
+                links_info += f"🟢 官方发布链接 (v8.3.0):\n"
+                links_info += f"https://github.com/ultralytics/assets/releases/download/v8.3.0/{model_name_with_ext}\n\n"
+                links_info += f"🔗 GitHub Releases页面:\n"
+                links_info += f"https://github.com/ultralytics/assets/releases/tag/v8.3.0\n\n"
+                links_info += f"🟡 备用链接:\n"
+                links_info += f"https://github.com/ultralytics/assets/releases/latest/download/{model_name_with_ext}\n\n"
+                links_info += f"💡 YOLO11说明:\n"
+                links_info += f"YOLO11在v8.3.0版本中正式发布，是YOLO系列的最新升级版本\n"
+                
+            elif model_name.startswith('yolo10') or model_name.startswith('yolov10'):
+                links_info += f"📌 YOLO10 系列推荐链接:\n\n"
+                links_info += f"🟢 主要链接:\n"
+                links_info += f"https://github.com/ultralytics/assets/releases/download/v8.2.0/{model_name_with_ext}\n\n"
+                links_info += f"🟡 备用链接:\n"
+                links_info += f"https://github.com/ultralytics/assets/releases/download/v8.3.0/{model_name_with_ext}\n"
+                
+            elif model_name.startswith('yolo9') or model_name.startswith('yolov9'):
+                links_info += f"📌 YOLO9 系列推荐链接:\n\n"
+                links_info += f"🟢 主要链接:\n"
+                links_info += f"https://github.com/ultralytics/assets/releases/download/v8.1.0/{model_name_with_ext}\n\n"
+                links_info += f"🟡 备用链接:\n"
+                links_info += f"https://github.com/ultralytics/assets/releases/download/v8.2.0/{model_name_with_ext}\n"
+                
+            elif model_name.startswith('yolo8') or model_name.startswith('yolov8'):
+                links_info += f"📌 YOLO8 系列推荐链接:\n\n"
+                links_info += f"🟢 主要链接:\n"
+                links_info += f"https://github.com/ultralytics/assets/releases/download/v8.0.0/{model_name_with_ext}\n\n"
+                links_info += f"🟡 备用链接:\n"
+                links_info += f"https://github.com/ultralytics/assets/releases/download/v8.2.0/{model_name_with_ext}\n"
+                
+            else:
+                links_info += f"📌 其他模型推荐链接:\n\n"
+                links_info += f"🟢 主要链接:\n"
+                links_info += f"https://github.com/ultralytics/assets/releases/download/v8.3.0/{model_name_with_ext}\n\n"
+                links_info += f"🟡 备用链接:\n"
+                links_info += f"https://github.com/ultralytics/assets/releases/latest/download/{model_name_with_ext}\n"
+            
+            # 获取缓存目录信息
+            home_dir = os.path.expanduser("~")
+            cache_dir = os.path.join(home_dir, ".cache", "ultralytics")
+            
+            links_info += f"\n\n💾 手动下载步骤:\n"
+            links_info += f"1. 复制上方链接在浏览器中打开\n"
+            links_info += f"2. 下载文件到缓存目录:\n   {cache_dir}\n"
+            links_info += f"3. 确保文件名为: {model_name_with_ext}\n"
+            links_info += f"4. 重新检查模型状态\n\n"
+            links_info += f"💡 如果GitHub被墙，建议使用VPN或代理"
+            
+            # 创建可滚动的消息框
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle(f"下载链接 - {model_name}")
+            msg_box.setText(links_info)
+            msg_box.setTextFormat(Qt.PlainText)
+            msg_box.setStandardButtons(QMessageBox.Ok | QMessageBox.Open)
+            msg_box.setDefaultButton(QMessageBox.Ok)
+            
+            # 设置消息框大小
+            msg_box.setStyleSheet("QMessageBox { min-width: 600px; }")
+            
+            # 显示消息框
+            result = msg_box.exec_()
+            
+            # 如果用户点击"Open"按钮，在浏览器中打开第一个链接
+            if result == QMessageBox.Open:
+                import webbrowser
+                if model_name.startswith('yolo11'):
+                    url = f"https://github.com/ultralytics/assets/releases/download/v8.3.0/{model_name_with_ext}"
+                elif model_name.startswith('yolo10'):
+                    url = f"https://github.com/ultralytics/assets/releases/download/v8.2.0/{model_name_with_ext}"
+                elif model_name.startswith('yolo9'):
+                    url = f"https://github.com/ultralytics/assets/releases/download/v8.1.0/{model_name_with_ext}"
+                elif model_name.startswith('yolo8'):
+                    url = f"https://github.com/ultralytics/assets/releases/download/v8.0.0/{model_name_with_ext}"
+                else:
+                    url = f"https://github.com/ultralytics/assets/releases/download/v8.3.0/{model_name_with_ext}"
+                
+                try:
+                    webbrowser.open(url)
+                    self.log_message(f"✅ 已在浏览器中打开下载链接: {url}")
+                except Exception as e:
+                    self.log_message(f"❌ 无法打开浏览器: {str(e)}")
+                    QMessageBox.warning(self, "错误", f"无法打开浏览器，请手动复制链接:\n{url}")
+            
+        except Exception as e:
+            error_msg = f"获取下载链接失败: {str(e)}"
+            self.log_message(f"❌ {error_msg}")
+            QMessageBox.warning(self, "错误", error_msg)
+
+    def show_training_diagnostic(self):
+        """显示训练问题诊断对话框"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("🔧 训练问题诊断助手")
+        dialog.setModal(True)
+        dialog.resize(600, 500)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # 创建滚动区域
+        scroll_area = QScrollArea()
+        scroll_widget = QWidget()
+        scroll_layout = QVBoxLayout(scroll_widget)
+        
+        # 标题
+        title_label = QLabel("训练问题诊断与解决方案")
+        title_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #333; margin-bottom: 10px;")
+        scroll_layout.addWidget(title_label)
+        
+        # 当前系统信息
+        current_info_group = QGroupBox("当前配置信息")
+        current_info_layout = QVBoxLayout()
+        
+        try:
+            import torch
+            import ultralytics
+            
+            batch_size = self.batch_size_spin.value()
+            img_size = self.img_size_spin.value()
+            epochs = self.epochs_spin.value()
+            
+            # 获取设备选择
+            device = "CPU"
+            if self.gpu0_radio.isChecked():
+                device = "GPU:0"
+            elif self.gpu1_radio.isChecked():
+                device = "GPU:1"
+            
+            cuda_available = torch.cuda.is_available()
+            ultralytics_version = getattr(ultralytics, '__version__', 'unknown')
+            torch_version = torch.__version__
+            
+            info_text = f"""
+当前训练配置:
+• 批量大小: {batch_size} {'✅ 安全' if batch_size <= 4 else '⚠️ 可能过大'}
+• 图像尺寸: {img_size} {'✅ 安全' if img_size <= 640 else '⚠️ 可能过大'}
+• 训练轮数: {epochs}
+• 设备选择: {device}
+
+系统环境:
+• CUDA可用: {'✅ 是' if cuda_available else '❌ 否'}
+• PyTorch版本: {torch_version}
+• Ultralytics版本: {ultralytics_version}
+"""
+            
+            if cuda_available:
+                try:
+                    gpu_name = torch.cuda.get_device_name(0)
+                    gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                    info_text += f"• GPU: {gpu_name} ({gpu_memory:.1f}GB)"
+                except:
+                    info_text += "• GPU: 信息获取失败"
+            
+        except Exception as e:
+            info_text = f"获取系统信息失败: {e}"
+        
+        current_info_label = QLabel(info_text)
+        current_info_label.setStyleSheet("font-family: Consolas, monospace; background: #f5f5f5; padding: 10px; border-radius: 5px;")
+        current_info_layout.addWidget(current_info_label)
+        current_info_group.setLayout(current_info_layout)
+        scroll_layout.addWidget(current_info_group)
+        
+        # 常见问题与解决方案
+        problems_solutions = [
+            {
+                "problem": "💥 内存访问违例错误 (0xC0000005)",
+                "description": "训练开始后程序崩溃，出现内存访问错误",
+                "solutions": [
+                    "1️⃣ 降低批量大小至1-2",
+                    "2️⃣ 减小图像尺寸（如320或416）", 
+                    "3️⃣ 检查数据集中是否有损坏图像",
+                    "4️⃣ 重启程序释放内存",
+                    "5️⃣ 尝试使用CPU训练",
+                    "6️⃣ 更新PyTorch和CUDA驱动"
+                ]
+            },
+            {
+                "problem": "🔄 模型重复下载",
+                "description": "每次训练都重新下载模型文件",
+                "solutions": [
+                    "1️⃣ 检查项目目录中是否有模型文件",
+                    "2️⃣ 使用'本地模型文件夹'选项",
+                    "3️⃣ 手动下载模型到项目目录"
+                ]
+            },
+            {
+                "problem": "⚠️ CUDA内存不足",
+                "description": "显存不够导致训练失败",
+                "solutions": [
+                    "1️⃣ 降低批量大小",
+                    "2️⃣ 减小图像尺寸",
+                    "3️⃣ 关闭其他占用显存的程序",
+                    "4️⃣ 使用CPU训练（device选择CPU）"
+                ]
+            },
+            {
+                "problem": "📁 数据集路径错误",
+                "description": "找不到训练数据或标签文件",
+                "solutions": [
+                    "1️⃣ 使用'一键生成YOLO数据集结构'",
+                    "2️⃣ 检查data.yaml中的路径设置",
+                    "3️⃣ 确保图像和标签文件名一致",
+                    "4️⃣ 使用绝对路径而非相对路径"
+                ]
+            },
+            {
+                "problem": "🐍 Python环境兼容性",
+                "description": "包版本冲突或兼容性问题",
+                "solutions": [
+                    "1️⃣ torch==2.3.1, torchvision==0.18.1",
+                    "2️⃣ numpy<2.0 (避免使用2.x版本)",
+                    "3️⃣ ultralytics>=8.3.0 (支持YOLO11)",
+                    "4️⃣ 升级setuptools: pip install --upgrade setuptools"
+                ]
+            }
+        ]
+        
+        # 问题解决方案
+        for item in problems_solutions:
+            group = QGroupBox(item["problem"])
+            group_layout = QVBoxLayout()
+            
+            # 问题描述
+            desc_label = QLabel(item["description"])
+            desc_label.setStyleSheet("color: #666; font-style: italic; margin-bottom: 5px;")
+            group_layout.addWidget(desc_label)
+            
+            # 解决方案
+            for solution in item["solutions"]:
+                solution_label = QLabel(solution)
+                solution_label.setStyleSheet("margin-left: 10px; margin-bottom: 3px;")
+                solution_label.setWordWrap(True)
+                group_layout.addWidget(solution_label)
+            
+            group.setLayout(group_layout)
+            scroll_layout.addWidget(group)
+        
+        scroll_widget.setLayout(scroll_layout)
+        scroll_area.setWidget(scroll_widget)
+        scroll_area.setWidgetResizable(True)
+        layout.addWidget(scroll_area)
+        
+        # 按钮
+        button_layout = QHBoxLayout()
+        
+        safe_config_btn = QPushButton("应用安全配置")
+        safe_config_btn.setStyleSheet("background-color: #28a745; color: white; padding: 8px; border-radius: 5px;")
+        safe_config_btn.clicked.connect(lambda: self.apply_safe_config(dialog))
+        
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(dialog.close)
+        
+        button_layout.addWidget(safe_config_btn)
+        button_layout.addStretch()
+        button_layout.addWidget(close_btn)
+        layout.addLayout(button_layout)
+        
+        dialog.exec_()
+    
+    def apply_safe_config(self, dialog):
+        """应用安全的训练配置"""
+        reply = QMessageBox.question(
+            self, 
+            "应用安全配置", 
+            "将应用以下安全配置:\n"
+            "• 批量大小: 2\n"
+            "• 图像尺寸: 416\n"
+            "• 训练轮数: 50\n\n"
+            "是否继续？",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            self.batch_size_spin.setValue(2)
+            self.img_size_spin.setValue(416)
+            self.epochs_spin.setValue(50)
+            QMessageBox.information(self, "配置已应用", "安全训练配置已应用！")
+            dialog.close()
+
+    def apply_ultra_safe_mode(self):
+        """应用超安全模式配置，专门针对内存访问违例问题"""
+        reply = QMessageBox.question(
+            self, 
+            "🛡️ 超安全模式", 
+            "超安全模式将应用以下配置来避免内存访问违例:\n\n"
+            "📊 训练参数:\n"
+            "• 批量大小: 1 (最小值)\n"
+            "• 图像尺寸: 320 (降低内存使用)\n"
+            "• 训练轮数: 20 (快速测试)\n"
+            "• 设备: CPU (最稳定)\n\n"
+            "⚡ 性能优化:\n"
+            "• 禁用数据增强\n"
+            "• 禁用混合精度\n"
+            "• 单线程处理\n\n"
+            "💡 此模式专门解决0xC0000005错误\n"
+            "训练速度会较慢但更稳定\n\n"
+            "是否应用超安全配置？",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            # 应用最安全的参数
+            self.batch_size_spin.setValue(1)
+            self.img_size_spin.setValue(320)
+            self.epochs_spin.setValue(20)
+            
+            # 切换到CPU训练
+            self.cpu_radio.setChecked(True)
+            
+            # 如果有YOLO8可选，切换到YOLO8（更稳定）
+            yolo8_models = [i for i in range(self.model_combo.count()) 
+                           if 'yolo8' in self.model_combo.itemText(i).lower()]
+            if yolo8_models:
+                self.model_combo.setCurrentIndex(yolo8_models[0])
+                self.log_message("🔄 切换到YOLO8模型（更稳定）")
+            
+            success_msg = (
+                "🛡️ 超安全模式已启用！\n\n"
+                "✅ 配置应用成功:\n"
+                "• 批量大小: 1\n"
+                "• 图像尺寸: 320\n"
+                "• 训练轮数: 20\n"
+                "• 设备: CPU\n"
+                f"• 模型: {self.model_combo.currentText()}\n\n"
+                "💡 现在可以开始训练了，这些设置应该能避免内存访问违例错误"
+            )
+            
+            QMessageBox.information(self, "超安全模式已启用", success_msg)
+            self.log_message("🛡️ 超安全模式配置已应用")

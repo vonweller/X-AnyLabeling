@@ -183,14 +183,33 @@ class TrainingWorker(QObject):
             if is_yolo12:
                 self.log_update.emit("检测到YOLO12模型，版本兼容性检查通过")
             
-            # 检查本地缓存
-            cached_model_path = os.path.join(DEFAULT_MODEL_CACHE_DIR, model_name_to_download)
+            # 检查多个可能的模型位置
+            possible_locations = [
+                # 1. 当前工作目录
+                os.path.join(os.getcwd(), model_name_to_download),
+                # 2. 项目根目录（通常是当前工作目录的同一位置，但为了确保）
+                os.path.abspath(model_name_to_download),
+                # 3. 本地缓存目录
+                os.path.join(DEFAULT_MODEL_CACHE_DIR, model_name_to_download),
+                # 4. ultralytics标准缓存目录
+                os.path.join(os.path.expanduser("~"), ".cache", "ultralytics", model_name_to_download),
+                # 5. 脚本所在目录
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", model_name_to_download),
+            ]
             
-            if os.path.exists(cached_model_path):
-                self.log_update.emit(f"在本地缓存中找到模型 {model_name_to_download}: {cached_model_path}")
-                return cached_model_path
-
-            self.log_update.emit(f"模型 {model_name_to_download} 不在本地缓存中，准备下载...")
+            # 检查每个可能的位置
+            self.log_update.emit(f"🔍 开始检查模型 {model_name_to_download} 的本地位置...")
+            for i, location in enumerate(possible_locations, 1):
+                self.log_update.emit(f"位置 {i}: 检查 {location}")
+                if os.path.exists(location):
+                    file_size = os.path.getsize(location) / (1024 * 1024)  # MB
+                    self.log_update.emit(f"✅ 在本地找到模型 {model_name_to_download}: {location} ({file_size:.1f}MB)")
+                    return location
+                else:
+                    self.log_update.emit(f"❌ 位置 {i} 未找到: {os.path.dirname(location)}")
+            
+            self.log_update.emit(f"🔍 模型 {model_name_to_download} 在所有本地位置都未找到，准备下载...")
+            self.log_update.emit(f"已检查的目录: {[os.path.dirname(loc) for loc in possible_locations]}")
             
             if not self._check_internet_connection():
                 self.log_update.emit(f"无法下载 {model_name_to_download}: 无网络连接")
@@ -222,16 +241,30 @@ class TrainingWorker(QObject):
 
             if downloaded_path and os.path.exists(downloaded_path):
                 self.log_update.emit(f"模型下载完成: {downloaded_path}")
-                # 复制到本地缓存
-                if downloaded_path != cached_model_path:
+                
+                # 优先级保存位置：项目目录 > 本地缓存目录
+                project_model_path = os.path.join(os.getcwd(), model_name_to_download)
+                cached_model_path = os.path.join(DEFAULT_MODEL_CACHE_DIR, model_name_to_download)
+                
+                # 尝试复制到项目目录（优先）
+                if downloaded_path != project_model_path:
                     try:
                         import shutil
-                        shutil.copy2(downloaded_path, cached_model_path)
-                        self.log_update.emit(f"已将模型复制到本地缓存: {cached_model_path}")
-                        return cached_model_path
+                        shutil.copy2(downloaded_path, project_model_path)
+                        self.log_update.emit(f"✅ 已将模型复制到项目目录: {project_model_path}")
+                        return project_model_path
                     except Exception as e:
-                        self.log_update.emit(f"警告: 复制模型到本地缓存失败: {e}，将使用Ultralytics的路径: {downloaded_path}")
-                        return downloaded_path
+                        self.log_update.emit(f"⚠️ 复制模型到项目目录失败: {e}，尝试复制到缓存目录...")
+                        
+                        # 如果项目目录复制失败，尝试复制到缓存目录
+                        try:
+                            shutil.copy2(downloaded_path, cached_model_path)
+                            self.log_update.emit(f"✅ 已将模型复制到本地缓存: {cached_model_path}")
+                            return cached_model_path
+                        except Exception as e2:
+                            self.log_update.emit(f"⚠️ 复制模型到缓存目录也失败: {e2}，将使用Ultralytics的路径: {downloaded_path}")
+                            return downloaded_path
+                
                 return downloaded_path
             else:
                 self.log_update.emit(f"下载后无法获取有效的模型路径: {model_name_to_download}")
@@ -427,14 +460,93 @@ class TrainingWorker(QObject):
             model.add_callback("on_fit_epoch_end", on_fit_epoch_end_callback)
             model.add_callback("on_train_end", on_train_end_callback)
             
+            # 快速检查数据集质量
+            self.log_update.emit("正在检查数据集图像...")
+            try:
+                self._quick_dataset_check(training_args.get('data'))
+            except Exception as check_e:
+                self.log_update.emit(f"数据集检查警告: {check_e}")
+            
             # 开始训练
             self.log_update.emit("开始训练...")
             try:
-                results = model.train(**training_args)
-                self.log_update.emit("训练调用完成")
+                # 添加GPU内存检查和激进清理
+                import torch
+                import gc
+                
+                # 强制垃圾回收
+                gc.collect()
+                
+                if torch.cuda.is_available() and self.device != "cpu":
+                    try:
+                        # 多次清理GPU内存
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()  # 同步CUDA操作
+                        gc.collect()  # 再次垃圾回收
+                        torch.cuda.empty_cache()  # 再次清理
+                        
+                        memory_total = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                        memory_allocated = torch.cuda.memory_allocated(0) / 1024**3
+                        memory_cached = torch.cuda.memory_reserved(0) / 1024**3
+                        self.log_update.emit(f"GPU内存状况: 总共{memory_total:.1f}GB, 已分配{memory_allocated:.1f}GB, 已缓存{memory_cached:.1f}GB")
+                        
+                        # 如果可用内存太少，强制使用CPU
+                        available_memory = memory_total - memory_allocated
+                        if available_memory < 2.0:  # 少于2GB可用内存
+                            self.log_update.emit(f"⚠️ GPU可用内存不足({available_memory:.1f}GB)，强制切换到CPU训练")
+                            training_args['device'] = 'cpu'
+                            training_args['batch'] = 1
+                            self.device = 'cpu'
+                        
+                    except Exception as mem_e:
+                        self.log_update.emit(f"GPU内存检查失败: {mem_e}")
+                        # 如果GPU检查失败，也切换到CPU
+                        self.log_update.emit("GPU检查失败，切换到CPU训练")
+                        training_args['device'] = 'cpu'
+                        training_args['batch'] = 1
+                        self.device = 'cpu'
+                
+                self.log_update.emit("正在调用YOLO训练...")
+                
+                # 如果是GPU训练且图像尺寸较大，给出警告
+                if self.device != "cpu" and self.img_size > 416:
+                    self.log_update.emit(f"⚠️ 警告：图像尺寸{self.img_size}可能导致内存问题，建议使用416或更小")
+                
+                # 尝试训练，如果失败提供备选方案
+                try:
+                    results = model.train(**training_args)
+                    self.log_update.emit("训练调用完成")
+                except Exception as train_error:
+                    # 如果训练失败，尝试CPU训练
+                    error_str = str(train_error)
+                    if "0xC0000005" in error_str or "access violation" in error_str.lower():
+                        self.log_update.emit("❌ GPU训练出现内存访问违例，尝试使用CPU训练...")
+                        training_args['device'] = 'cpu'
+                        training_args['batch'] = 1  # CPU训练使用更小的批量
+                        training_args['imgsz'] = min(320, self.img_size)  # 使用更小的图像尺寸
+                        self.log_update.emit(f"🔄 切换到CPU训练：batch=1, imgsz={training_args['imgsz']}")
+                        results = model.train(**training_args)
+                        self.log_update.emit("✅ CPU训练完成")
+                    else:
+                        raise train_error
             except Exception as e:
-                error_msg = f"训练过程出错: {str(e)}"
+                import traceback
+                error_detail = traceback.format_exc()
+                error_msg = f"训练过程出错: {str(e)}\n详细错误信息:\n{error_detail}"
                 self.log_update.emit(error_msg)
+                
+                # 检查是否是内存相关错误
+                if "0xC0000005" in str(e) or "access violation" in str(e).lower():
+                    memory_suggestion = (
+                        "\n⚠️ 检测到内存访问违例错误，建议解决方案:\n"
+                        "1. 降低批量大小 (当前建议: 1-2)\n"
+                        "2. 减少图像尺寸 (如640->416)\n"
+                        "3. 检查数据集中是否有损坏的图像\n"
+                        "4. 重启程序释放内存\n"
+                        "5. 如果问题持续，尝试使用CPU训练"
+                    )
+                    error_msg += memory_suggestion
+                
                 self._emit_training_complete(success=False, message=error_msg)
                 return
             
@@ -471,6 +583,63 @@ class TrainingWorker(QObject):
         elif self._trainer_ref and hasattr(self._trainer_ref, 'stop'):
              self._trainer_ref.stop = True # This is usually the flag ultralytics checks
              self.log_update.emit("Set trainer.stop = True via stop method direct access")
+
+    def _quick_dataset_check(self, data_yaml_path):
+        """快速检查数据集中的图像文件是否可读"""
+        if not data_yaml_path or not os.path.exists(data_yaml_path):
+            return
+        
+        try:
+            import yaml
+            from PIL import Image
+            import random
+            
+            with open(data_yaml_path, 'r', encoding='utf-8') as f:
+                data_config = yaml.safe_load(f)
+            
+            # 获取训练图像目录
+            train_path = data_config.get('train', '')
+            if not train_path:
+                return
+                
+            # 如果是相对路径，转换为绝对路径
+            if not os.path.isabs(train_path):
+                train_path = os.path.join(os.path.dirname(data_yaml_path), train_path)
+            
+            if not os.path.exists(train_path):
+                self.log_update.emit(f"训练图像目录不存在: {train_path}")
+                return
+            
+            # 获取所有图像文件
+            image_extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif']
+            image_files = []
+            for ext in image_extensions:
+                image_files.extend([f for f in os.listdir(train_path) if f.lower().endswith(ext)])
+            
+            if not image_files:
+                self.log_update.emit("训练目录中未找到图像文件")
+                return
+            
+            # 随机检查一些图像文件
+            sample_size = min(10, len(image_files))
+            sample_files = random.sample(image_files, sample_size)
+            
+            corrupted_files = []
+            for img_file in sample_files:
+                img_path = os.path.join(train_path, img_file)
+                try:
+                    with Image.open(img_path) as img:
+                        img.verify()  # 验证图像完整性
+                except Exception as e:
+                    corrupted_files.append(img_file)
+            
+            if corrupted_files:
+                self.log_update.emit(f"⚠️ 发现损坏的图像文件（可能导致训练崩溃）: {corrupted_files}")
+            else:
+                self.log_update.emit(f"✅ 数据集图像检查完成，随机抽查{sample_size}个文件正常")
+            
+        except Exception as e:
+            self.log_update.emit(f"数据集检查出错: {e}")
 
     def _emit_training_complete(self, success=True, message=None):
         if success:
