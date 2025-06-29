@@ -50,7 +50,8 @@ class TrainingWorker(QObject):
     
     def __init__(self, model_name, data_yaml_path, epochs, batch_size, img_size, output_dir, 
                  device, task, is_from_scratch, freeze_backbone, other_args,
-                 model_source_option, local_model_search_dir=None, project_name="yolo_project"):
+                 model_source_option, local_model_search_dir=None, project_name="yolo_project",
+                 performance_mode=False):
         """
         Initialize the training worker with parameters.
         
@@ -70,6 +71,7 @@ class TrainingWorker(QObject):
             model_source_option (str): 'download', 'local_folder', or 'custom_file'.
             local_model_search_dir (str, optional): Directory to search for local models if source is 'local_folder'.
             project_name (str): Project name for output organization.
+            performance_mode (bool): 启用高性能训练模式，减少日志输出和检查
         """
         super().__init__()
         # Renaming for clarity within worker to match original TrainingTab names somewhat
@@ -88,6 +90,7 @@ class TrainingWorker(QObject):
         self.model_source_option = model_source_option
         self.local_model_search_dir = local_model_search_dir
         self.project_name = project_name # Used for `project` in YOLO trainer
+        self.performance_mode = performance_mode  # 新增：高性能模式标志
 
         # Original args that might be slightly different now:
         # self.model_type was more like a base (yolov8n), now model_name is more direct
@@ -99,6 +102,122 @@ class TrainingWorker(QObject):
         self._trainer_ref = None
         self._process_ref = None
     
+    def _log(self, message):
+        """智能日志输出：高性能模式下减少日志"""
+        if not self.performance_mode:
+            self.log_update.emit(message)
+    
+    def run_performance_mode(self):
+        """高性能训练模式：最小化开销，最大化速度"""
+        try:
+            self.log_update.emit("🚀 启动高性能训练模式...")
+            
+            from ultralytics import YOLO
+            
+            # 1. 快速模型初始化（跳过复杂检查）
+            actual_model_to_load = self._resolve_model_path_fast()
+            if not actual_model_to_load:
+                self.training_error.emit("模型路径解析失败")
+                return
+            
+            self.log_update.emit(f"模型: {actual_model_to_load}")
+            
+            # 2. 初始化模型
+            model = YOLO(actual_model_to_load)
+            
+            # 3. 准备训练参数（简化）
+            training_args = {
+                'data': self.data_yaml_path,
+                'epochs': self.epochs,
+                'batch': self.batch_size,
+                'imgsz': self.img_size,
+                'project': self.output_dir,
+                'name': self.project_name,
+                'device': self.device if self.device else None,
+                'exist_ok': True,
+                'verbose': False,  # 关闭详细输出
+            }
+            
+            # 处理冻结参数
+            if not self.is_from_scratch and self.freeze_backbone:
+                if self.task_type == "detect":
+                    training_args['freeze'] = 10
+                elif self.task_type == "classify":
+                    training_args['freeze'] = True
+            
+            # 添加其他参数
+            training_args.update(self.other_args)
+            
+            self.log_update.emit(f"参数: Epochs={self.epochs}, Batch={self.batch_size}, ImgSz={self.img_size}")
+            
+            # 4. 设置最小化回调（只更新进度，不发送详细日志）
+            def minimal_callback(trainer):
+                if self._stop_event.is_set():
+                    trainer.stop = True
+                    return
+                
+                current_epoch = trainer.epoch + 1
+                # 只每10个epoch或最后一个epoch更新一次进度
+                if current_epoch % 10 == 0 or current_epoch == self.epochs:
+                    progress = int((current_epoch / self.epochs) * 100)
+                    self.progress_update.emit(progress)
+                    self._log(f"Epoch {current_epoch}/{self.epochs}")
+            
+            model.add_callback("on_train_epoch_end", minimal_callback)
+            
+            # 5. 开始训练（不做额外检查）
+            self.log_update.emit("开始训练...")
+            results = model.train(**training_args)
+            
+            if self._stop_event.is_set():
+                self.training_error.emit("训练被用户停止")
+            else:
+                self.log_update.emit("✅ 训练完成")
+                self.training_complete.emit()
+                
+        except Exception as e:
+            self.training_error.emit(f"训练失败: {str(e)}")
+        finally:
+            self._trainer_ref = None
+            self._stop_event.clear()
+    
+    def _resolve_model_path_fast(self):
+        """快速模型路径解析（跳过复杂检查）"""
+        if self.is_from_scratch:
+            return self.model_type_or_path.replace(".pt", "").replace(".pth", "")
+        
+        if self.model_source_option == "download":
+            model_to_download = self.model_type_or_path
+            if not model_to_download.endswith((".pt", ".pth")):
+                model_to_download += ".pt"
+            
+            # 快速检查本地是否存在
+            local_paths = [
+                os.path.join(os.getcwd(), model_to_download),
+                os.path.join(DEFAULT_MODEL_CACHE_DIR, model_to_download),
+            ]
+            
+            for path in local_paths:
+                if os.path.exists(path):
+                    return path
+            
+            # 如果本地不存在，直接返回模型名让YOLO自动下载
+            return model_to_download
+            
+        elif self.model_source_option == "local_folder":
+            if not self.local_model_search_dir:
+                return None
+            model_filename = self.model_type_or_path
+            if not model_filename.endswith((".pt", ".pth")):
+                model_filename += ".pt"
+            potential_path = os.path.join(self.local_model_search_dir, model_filename)
+            return potential_path if os.path.isfile(potential_path) else None
+            
+        elif self.model_source_option == "custom_file":
+            return self.model_type_or_path if os.path.isfile(self.model_type_or_path) else None
+        
+        return None
+
     def _check_internet_connection(self):
         """
         Check for internet connectivity.
@@ -355,6 +474,14 @@ class TrainingWorker(QObject):
 
     def run(self):
         """Run the training process."""
+        # 选择运行模式
+        if self.performance_mode:
+            self.run_performance_mode()
+        else:
+            self.run_normal_mode()
+    
+    def run_normal_mode(self):
+        """正常训练模式：详细日志和检查"""
         try:
             self.log_update.emit("开始初始化训练进程...")
             
